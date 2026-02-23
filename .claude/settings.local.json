@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /c/Users/pc/Desktop/Hackathon2-todo/Hackathon2-todo && uv add --dev hatchling 2>&1 && uv sync 2>&1)",
+      "Bash(cd /c/Users/pc/Desktop/Hackathon2-todo/Hackathon2-todo && echo \"1\nBuy groceries\nMilk eggs and bread\n2\n5\n1\n2\n0\" | uv run todo 2>&1)"
+    ]
+  }
+}
