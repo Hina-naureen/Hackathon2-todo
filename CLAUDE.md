@@ -208,3 +208,132 @@ Wait for consent; never auto-create ADRs. Group related decisions (stacks, authe
 
 ## Code Standards
 See `.specify/memory/constitution.md` for code quality, testing, performance, security, and architecture principles.
+
+---
+
+## Phase I — Spec Reading Protocol
+
+### Session Start Checklist
+
+At the start of **every** Claude Code session on this project, read these files in order before touching any code or creating any artifact:
+
+```
+1. specs/constitution.md          ← binding rules for Phase I
+2. specs/architecture.md          ← module contracts and layer diagram
+3. specs/features/task-crud.md    ← user stories and acceptance criteria
+4. .specify/memory/constitution.md ← global rules (all phases)
+```
+
+Do not proceed with implementation until all four have been read in this session. If any file is missing or unreadable, surface the issue to the user before continuing.
+
+### Spec Referencing Rules
+
+Every code change, comment, and PHR must cite its authoritative source. Use the following format:
+
+```python
+# References: specs/features/task-crud.md §US-01, AC-3
+# References: specs/constitution.md §II Coding Constraints
+# References: specs/architecture.md §Layer 2 — Service Layer
+```
+
+**Rules:**
+
+| Rule | Requirement |
+|------|-------------|
+| Every new function | Must cite the spec section it implements |
+| Every PHR `files:` entry | Must include the spec it was generated from in `links.spec` |
+| Every acceptance criterion | Must be traceable to a named test (`test_<unit>_<scenario>_<outcome>`) |
+| No code without a spec citation | If no section exists, stop and ask the user to update the spec first |
+| ADR suggestions | Must reference the spec section that triggered the decision |
+
+**Do not** reference specs by line number — sections change. Use the heading path:
+- `specs/features/task-crud.md §US-03` (user story)
+- `specs/features/task-crud.md §FR-007` (functional requirement)
+- `specs/constitution.md §III Architecture Rules` (principle)
+- `specs/architecture.md §Layer 1 — Data Layer` (module contract)
+
+### Spec Hierarchy (precedence order)
+
+When specs conflict, resolve by precedence:
+
+```
+1. specs/constitution.md           (highest — Phase I binding rules)
+2. specs/architecture.md           (module-level contracts)
+3. specs/features/task-crud.md     (feature acceptance criteria)
+4. specs/phase1-console/           (historical — superseded by above)
+```
+
+The spec wins over the code. If the code disagrees with a spec, fix the code.
+
+---
+
+## Phase I — Development Workflow
+
+### Full Lifecycle (must follow in order)
+
+```
+Constitution → Spec → Architecture → Tasks → Red → Green → Refactor
+```
+
+| Stage | Command | Output location |
+|-------|---------|----------------|
+| Constitution | Write manually or `/sp.constitution` | `specs/constitution.md` |
+| Feature Spec | `/sp.spec <feature>` | `specs/features/<feature>.md` |
+| Architecture | `/sp.plan <feature>` | `specs/architecture.md` |
+| Task Breakdown | `/sp.tasks <feature>` | `specs/features/<feature>-tasks.md` |
+| Red (tests) | Implement failing tests first | `tests/test_<module>.py` |
+| Green (code) | Implement to pass tests | `src/<module>.py` |
+| Refactor | Clean without changing behaviour | same files |
+| PHR | Auto-created after every prompt | `history/prompts/<feature>/` |
+
+**Never skip a stage.** Green before Red is a constitution violation.
+
+### Phase I File Map
+
+| What to change | File to edit |
+|----------------|-------------|
+| Task data structure or storage | `src/models.py` |
+| Business logic or validation | `src/task_manager.py` |
+| Console I/O, menus, display | `src/cli.py` |
+| App wiring or event loop | `src/main.py` |
+| Phase I binding rules | `specs/constitution.md` |
+| Feature acceptance criteria | `specs/features/task-crud.md` |
+| Module contracts and layers | `specs/architecture.md` |
+
+### Layer Import Direction (strictly enforced)
+
+```
+main.py  →  cli.py  →  task_manager.py  →  models.py
+```
+
+Never import upward. Never import diagonally. If a lower layer needs something from a higher layer, that is a design error — surface it and redesign.
+
+### What Claude Code Must Ask Before Implementing
+
+Before writing any code, confirm:
+
+1. Which spec section (US-XX, FR-XXX) does this implement?
+2. Does a failing test exist for this acceptance criterion?
+3. Does the change stay within the current phase's scope?
+4. Does the change respect the layer import direction?
+
+If any answer is no, stop and resolve it with the user before proceeding.
+
+### PHR Stage Reference
+
+| Work type | PHR stage |
+|-----------|-----------|
+| Writing constitution or principles | `constitution` |
+| Writing a feature spec | `spec` |
+| Writing architecture or plan | `plan` |
+| Writing task breakdowns | `tasks` |
+| Writing failing tests | `red` |
+| Writing implementation to pass tests | `green` |
+| Cleaning up code after tests pass | `refactor` |
+| Explaining existing code | `explainer` |
+| General/miscellaneous work | `general` |
+
+PHR files live at:
+- `history/prompts/constitution/<ID>-<slug>.constitution.prompt.md`
+- `history/prompts/<feature>/<ID>-<slug>.<stage>.prompt.md`
+- `history/prompts/general/<ID>-<slug>.general.prompt.md`
