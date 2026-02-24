@@ -14,9 +14,20 @@ build/
 .env
 .env.local
 
+# Node / Next.js
+node_modules/
+.next/
+.vercel/
+out/
+
 # IDE
 .vscode/
 .idea/
+
+# SQLite dev databases
+*.db
+*.db-shm
+*.db-wal
 
 # OS
 .DS_Store
