@@ -10,7 +10,8 @@ interface Message {
   id: number
   role: 'user' | 'assistant'
   content: string
-  showAction?: boolean  // true when the "add" keyword was detected — renders Create Task button
+  showAction?: boolean   // true when the "add" keyword was detected — renders Create Task button
+  taskTitle?: string     // extracted task subject — sent as prefillTitle to the modal
 }
 
 interface ChatPanelProps {
@@ -174,6 +175,7 @@ export default function ChatPanel({ onClose }: ChatPanelProps) {
         role: 'assistant',
         content: simulateAI(text),
         showAction: text.toLowerCase().includes('add'),
+        taskTitle: extractTask(text),
       },
     ])
   }
@@ -258,7 +260,13 @@ export default function ChatPanel({ onClose }: ChatPanelProps) {
             {msg.role === 'assistant' && msg.showAction && (
               <div className="msg-in flex justify-start pl-8">
                 <button
-                  onClick={() => window.dispatchEvent(new Event('open-add-task'))}
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent('open-add-task', {
+                        detail: { title: msg.taskTitle ?? '' },
+                      })
+                    )
+                  }
                   className="px-3 py-1.5 text-xs font-medium rounded-xl bg-slate-900 text-white hover:scale-105 active:scale-95 transition-all duration-200 dark:bg-white dark:text-slate-900"
                 >
                   + Create Task

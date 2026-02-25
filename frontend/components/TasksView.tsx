@@ -22,7 +22,7 @@ interface Props {
 
 type ModalState =
   | null
-  | { type: 'add' }
+  | { type: 'add'; prefillTitle?: string }
   | { type: 'edit'; task: Task }
   | { type: 'delete'; task: Task }
 
@@ -48,9 +48,12 @@ export default function TasksView({ initialTasks, token, userEmail, userName }: 
     })
   }, [])
 
-  // Phase V — open Add Task modal when ChatPanel dispatches "open-add-task"
+  // Phase VI — open Add Task modal and prefill title from ChatPanel's CustomEvent
   useEffect(() => {
-    const open = () => setModal({ type: 'add' })
+    const open = (e: Event) => {
+      const title = (e as CustomEvent<{ title?: string }>).detail?.title ?? ''
+      setModal({ type: 'add', prefillTitle: title })
+    }
     window.addEventListener('open-add-task', open)
     return () => window.removeEventListener('open-add-task', open)
   }, [])
@@ -189,6 +192,7 @@ export default function TasksView({ initialTasks, token, userEmail, userName }: 
         <TaskFormModal
           heading="Add Task"
           submitLabel="Add Task"
+          initialTitle={modal.prefillTitle}
           onClose={() => setModal(null)}
           onSubmit={handleAdd}
         />
