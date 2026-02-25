@@ -43,7 +43,7 @@ const WELCOME: Message = {
 function extractTask(raw: string): string {
   return raw
     .replace(
-      /\b(add|create|make|schedule|put|set|today|tomorrow|urgent|homework|meeting|please|a|an|the)\b/gi,
+      /\b(add|create|make|schedule|put|set|today|tomorrow|urgent|please|a|an|the)\b/gi,
       ''
     )
     .replace(/\s+/g, ' ')
