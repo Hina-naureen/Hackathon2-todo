@@ -10,9 +10,10 @@ import ChatPanel from './ChatPanel'
 interface ChatWidgetProps {
   token: string
   onMutation?: () => void
+  pendingTaskCount: number
 }
 
-export default function ChatWidget({ token, onMutation }: ChatWidgetProps) {
+export default function ChatWidget({ token, onMutation, pendingTaskCount }: ChatWidgetProps) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -26,7 +27,12 @@ export default function ChatWidget({ token, onMutation }: ChatWidgetProps) {
             : 'opacity-0 scale-90 translate-y-4 pointer-events-none'
         }`}
       >
-        <ChatPanel token={token} onClose={() => setOpen(false)} onMutation={onMutation} />
+        <ChatPanel
+          token={token}
+          onClose={() => setOpen(false)}
+          onMutation={onMutation}
+          pendingTaskCount={pendingTaskCount}
+        />
       </div>
 
       {/* Floating toggle button */}

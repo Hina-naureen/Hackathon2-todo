@@ -232,7 +232,11 @@ export default function TasksView({ initialTasks, token, userEmail, userName }: 
       )}
 
       {/* Phase III — AI chat widget */}
-      <ChatWidget token={token} onMutation={triggerHighlight} />
+      <ChatWidget
+        token={token}
+        onMutation={triggerHighlight}
+        pendingTaskCount={tasks.filter(t => !t.completed).length}
+      />
     </div>
   )
 }

@@ -18,16 +18,7 @@ interface ChatPanelProps {
   token: string
   onClose: () => void
   onMutation?: () => void
-}
-
-// ---------------------------------------------------------------------------
-// Seed message shown on open
-// ---------------------------------------------------------------------------
-
-const WELCOME: Message = {
-  id: 0,
-  role: 'assistant',
-  content: "Hi! I'm your AI assistant. Ask me anything about your tasks.",
+  pendingTaskCount: number
 }
 
 // ---------------------------------------------------------------------------
@@ -144,11 +135,20 @@ function AiAvatar() {
 // ChatPanel
 // ---------------------------------------------------------------------------
 
-export default function ChatPanel({ onClose }: ChatPanelProps) {
-  const [messages, setMessages] = useState<Message[]>([WELCOME])
+export default function ChatPanel({ onClose, pendingTaskCount }: ChatPanelProps) {
+  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Phase IX — smart greeting on mount based on current task state
+  useEffect(() => {
+    const content =
+      pendingTaskCount > 0
+        ? `You have ${pendingTaskCount} pending task${pendingTaskCount === 1 ? '' : 's'}. Want help organizing them?`
+        : "You're all caught up! Want to plan something new?"
+    setMessages([{ id: Date.now(), role: 'assistant', content }])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -276,29 +276,12 @@ export default function ChatPanel({ onClose }: ChatPanelProps) {
           </Fragment>
         ))}
 
-        {/* Typing indicator — bouncing dots + "AI is typing…" label */}
+        {/* Typing indicator — driven by existing loading state, no new state added */}
         {loading && (
-          <div className="msg-in flex items-end gap-2 justify-start">
-            <AiAvatar />
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-2xl rounded-bl-sm bg-slate-100 dark:bg-zinc-800">
-              <span className="flex gap-1 items-center">
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce"
-                  style={{ animationDelay: '0ms' }}
-                />
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce"
-                  style={{ animationDelay: '150ms' }}
-                />
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce"
-                  style={{ animationDelay: '300ms' }}
-                />
-              </span>
-              <span className="text-[11px] text-slate-400 dark:bg-zinc-500 italic">
-                AI is typing…
-              </span>
-            </div>
+          <div className="flex gap-1 px-3 py-2">
+            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
+            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
           </div>
         )}
 
