@@ -54,9 +54,16 @@ async function request<T>(
   return res.json() as Promise<T>
 }
 
+export interface ChatActionItem {
+  tool: string
+  args: Record<string, unknown>
+  result: unknown
+}
+
 export interface ChatResponse {
   reply: string
   trace_id: string
+  actions: ChatActionItem[]
 }
 
 export const chatApi = {

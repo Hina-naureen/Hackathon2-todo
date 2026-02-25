@@ -13,9 +13,13 @@ interface Message {
   content: string
 }
 
+// Tools that mutate task data — used to trigger task list highlight
+const MUTATION_TOOLS = new Set(['create_task', 'update_task', 'toggle_complete'])
+
 interface ChatPanelProps {
   token: string
   onClose: () => void
+  onMutation?: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -29,10 +33,27 @@ const WELCOME: Message = {
 }
 
 // ---------------------------------------------------------------------------
+// AI avatar — gradient circle with star icon
+// ---------------------------------------------------------------------------
+
+function AiAvatar() {
+  return (
+    <div
+      className="flex-shrink-0 w-6 h-6 rounded-full bg-linear-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-sm"
+      aria-hidden="true"
+    >
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="white">
+        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+      </svg>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // ChatPanel
 // ---------------------------------------------------------------------------
 
-export default function ChatPanel({ token, onClose }: ChatPanelProps) {
+export default function ChatPanel({ token, onClose, onMutation }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([WELCOME])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -59,6 +80,10 @@ export default function ChatPanel({ token, onClose }: ChatPanelProps) {
         ...prev,
         { id: Date.now(), role: 'assistant', content: data.reply },
       ])
+      // Trigger task list highlight if any mutation tool was called
+      if (data.actions?.some(a => MUTATION_TOOLS.has(a.tool))) {
+        onMutation?.()
+      }
     } catch (err) {
       const content =
         err instanceof ApiError && err.status === 401
@@ -81,31 +106,36 @@ export default function ChatPanel({ token, onClose }: ChatPanelProps) {
   }
 
   return (
-    <div className="flex flex-col w-80 h-115 rounded-2xl backdrop-blur-md bg-white/90 shadow-xl border border-white/60 overflow-hidden dark:bg-zinc-900/90 dark:border-zinc-700/60">
+    <div className="flex flex-col w-80 h-115 rounded-2xl backdrop-blur-md bg-white/90 border border-violet-200/50 shadow-[0_8px_32px_rgba(139,92,246,0.12),0_2px_8px_rgba(0,0,0,0.08)] overflow-hidden dark:bg-zinc-900/90 dark:border-violet-800/30 dark:shadow-[0_8px_32px_rgba(139,92,246,0.18),0_2px_8px_rgba(0,0,0,0.3)]">
 
-      {/* Phase III preview banner */}
-      <div className="flex items-center justify-center gap-1.5 px-4 py-1.5 bg-linear-to-r from-violet-500/10 via-purple-500/10 to-blue-500/10 border-b border-purple-200/40 dark:border-purple-800/30">
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-purple-600 dark:text-purple-400">
-          Phase III Preview
-        </span>
-      </div>
+      {/* Gradient header bar — Phase III Preview */}
+      <div className="relative flex items-center justify-between px-4 py-3 bg-linear-to-r from-violet-600 via-purple-600 to-blue-600 overflow-hidden">
+        {/* Subtle shine */}
+        <div className="absolute inset-0 bg-white/10" aria-hidden="true" />
 
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100/80 dark:border-zinc-700/60 bg-white/60 dark:bg-zinc-800/60 backdrop-blur-sm">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-sm font-semibold tracking-tight text-slate-900 dark:text-white">
-            AI Assistant
+        {/* Left: pulsing dot + title + subtitle */}
+        <div className="relative flex items-center gap-2.5">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
           </span>
+          <div>
+            <p className="text-xs font-bold text-white leading-none">AI Assistant</p>
+            <p className="text-[10px] font-medium text-white/70 leading-none mt-0.5 uppercase tracking-widest">
+              Phase III Preview
+            </p>
+          </div>
         </div>
+
+        {/* Right: close button */}
         <button
           onClick={onClose}
-          className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors dark:text-zinc-500 dark:hover:text-zinc-200 dark:hover:bg-zinc-700"
+          className="relative p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/20 transition-colors"
           aria-label="Close chat"
         >
           <svg
-            width="16"
-            height="16"
+            width="15"
+            height="15"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -125,10 +155,15 @@ export default function ChatPanel({ token, onClose }: ChatPanelProps) {
         {messages.map(msg => (
           <div
             key={msg.id}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            className={`msg-in flex items-end gap-2 ${
+              msg.role === 'user' ? 'justify-end' : 'justify-start'
+            }`}
           >
+            {/* AI avatar — only for assistant messages */}
+            {msg.role === 'assistant' && <AiAvatar />}
+
             <div
-              className={`max-w-[78%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
+              className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
                 msg.role === 'user'
                   ? 'bg-slate-900 text-white rounded-br-sm dark:bg-white dark:text-slate-900'
                   : 'bg-slate-100 text-slate-700 rounded-bl-sm dark:bg-zinc-800 dark:text-zinc-200'
@@ -139,14 +174,27 @@ export default function ChatPanel({ token, onClose }: ChatPanelProps) {
           </div>
         ))}
 
-        {/* Typing indicator — shown while awaiting backend response */}
+        {/* Typing indicator — bouncing dots + "AI is typing…" label */}
         {loading && (
-          <div className="flex justify-start">
-            <div className="px-3 py-3 rounded-2xl rounded-bl-sm bg-slate-100 dark:bg-zinc-800">
+          <div className="msg-in flex items-end gap-2 justify-start">
+            <AiAvatar />
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-2xl rounded-bl-sm bg-slate-100 dark:bg-zinc-800">
               <span className="flex gap-1 items-center">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce"
+                  style={{ animationDelay: '0ms' }}
+                />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce"
+                  style={{ animationDelay: '150ms' }}
+                />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-zinc-500 animate-bounce"
+                  style={{ animationDelay: '300ms' }}
+                />
+              </span>
+              <span className="text-[11px] text-slate-400 dark:text-zinc-500 italic">
+                AI is typing…
               </span>
             </div>
           </div>
@@ -165,12 +213,12 @@ export default function ChatPanel({ token, onClose }: ChatPanelProps) {
             onKeyDown={handleKeyDown}
             placeholder={loading ? 'Waiting for reply…' : 'Ask anything…'}
             disabled={loading}
-            className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all duration-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed dark:bg-zinc-700 dark:border-zinc-600 dark:text-white dark:placeholder:text-zinc-400 dark:focus:ring-zinc-400"
+            className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all duration-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed dark:bg-zinc-700 dark:border-zinc-600 dark:text-white dark:placeholder:text-zinc-400 dark:focus:ring-violet-400"
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || loading}
-            className="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-40 transition-all duration-200 hover:scale-105 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+            className="w-9 h-9 flex items-center justify-center rounded-xl bg-linear-to-br from-violet-600 to-purple-600 text-white hover:opacity-90 disabled:opacity-40 transition-all duration-200 hover:scale-105 shadow-sm"
             aria-label="Send message"
           >
             <svg

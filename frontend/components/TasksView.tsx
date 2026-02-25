@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import Header from './Header'
 import ChatWidget from './ChatWidget'
 import { Task, tasksApi, ApiError, CreateTaskInput, UpdateTaskInput } from '@/lib/api'
@@ -35,6 +35,18 @@ export default function TasksView({ initialTasks, token, userEmail, userName }: 
   const [modal, setModal] = useState<ModalState>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [togglingIds, setTogglingIds] = useState<Set<number>>(new Set())
+  const [taskListHighlighted, setTaskListHighlighted] = useState(false)
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const triggerHighlight = useCallback(() => {
+    if (highlightTimer.current) clearTimeout(highlightTimer.current)
+    setTaskListHighlighted(false)
+    // One frame gap ensures CSS animation restarts if called in quick succession
+    requestAnimationFrame(() => {
+      setTaskListHighlighted(true)
+      highlightTimer.current = setTimeout(() => setTaskListHighlighted(false), 1400)
+    })
+  }, [])
 
   const showToast = useCallback((msg: string) => {
     setToast(msg)
@@ -140,27 +152,29 @@ export default function TasksView({ initialTasks, token, userEmail, userName }: 
           </button>
         </div>
 
-        {/* Task list */}
-        {tasks.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-16 text-center dark:bg-zinc-800 dark:border-zinc-800">
-            <p className="text-slate-400 text-sm dark:text-zinc-500">
-              No tasks yet. Add your first task.
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {tasks.map(task => (
-              <TaskItem
-                key={task.id}
-                task={task}
-                toggling={togglingIds.has(task.id)}
-                onToggle={() => handleToggle(task)}
-                onEdit={() => setModal({ type: 'edit', task })}
-                onDelete={() => setModal({ type: 'delete', task })}
-              />
-            ))}
-          </div>
-        )}
+        {/* Task list — highlight wrapper reacts to AI mutations */}
+        <div className={taskListHighlighted ? 'task-list-highlight' : ''}>
+          {tasks.length === 0 ? (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-16 text-center dark:bg-zinc-800 dark:border-zinc-800">
+              <p className="text-slate-400 text-sm dark:text-zinc-500">
+                No tasks yet. Add your first task.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {tasks.map(task => (
+                <TaskItem
+                  key={task.id}
+                  task={task}
+                  toggling={togglingIds.has(task.id)}
+                  onToggle={() => handleToggle(task)}
+                  onEdit={() => setModal({ type: 'edit', task })}
+                  onDelete={() => setModal({ type: 'delete', task })}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </main>
 
       {/* Modals */}
@@ -191,7 +205,7 @@ export default function TasksView({ initialTasks, token, userEmail, userName }: 
       )}
 
       {/* Phase III — AI chat widget */}
-      <ChatWidget token={token} />
+      <ChatWidget token={token} onMutation={triggerHighlight} />
     </div>
   )
 }
