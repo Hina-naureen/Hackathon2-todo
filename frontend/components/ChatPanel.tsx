@@ -262,7 +262,7 @@ export default function ChatPanel({ onClose }: ChatPanelProps) {
                 <button
                   onClick={() =>
                     window.dispatchEvent(
-                      new CustomEvent('open-add-task', {
+                      new CustomEvent('ai-create-task', {
                         detail: { title: msg.taskTitle ?? '' },
                       })
                     )

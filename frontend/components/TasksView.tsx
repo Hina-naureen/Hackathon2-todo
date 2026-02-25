@@ -58,6 +58,22 @@ export default function TasksView({ initialTasks, token, userEmail, userName }: 
     return () => window.removeEventListener('open-add-task', open)
   }, [])
 
+  // Phase VII — direct AI task creation: bypass modal, add to list immediately
+  useEffect(() => {
+    const create = async (e: Event) => {
+      const title =
+        (e as CustomEvent<{ title?: string }>).detail?.title || 'New Task'
+      try {
+        const task = await tasksApi.createTask(token, { title, description: '' })
+        setTasks(prev => [...prev, task])
+      } catch {
+        // AI-triggered creation — fail silently, no toast needed
+      }
+    }
+    window.addEventListener('ai-create-task', create)
+    return () => window.removeEventListener('ai-create-task', create)
+  }, [token])
+
   const showToast = useCallback((msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(null), 4000)
