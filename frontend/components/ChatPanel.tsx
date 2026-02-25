@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import { chatApi, ApiError } from '@/lib/api'
+import { useState, useRef, useEffect, Fragment } from 'react'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -11,10 +10,8 @@ interface Message {
   id: number
   role: 'user' | 'assistant'
   content: string
+  showAction?: boolean  // true when the "add" keyword was detected — renders Create Task button
 }
-
-// Tools that mutate task data — used to trigger task list highlight
-const MUTATION_TOOLS = new Set(['create_task', 'update_task', 'toggle_complete'])
 
 interface ChatPanelProps {
   token: string
@@ -31,6 +28,99 @@ const WELCOME: Message = {
   role: 'assistant',
   content: "Hi! I'm your AI assistant. Ask me anything about your tasks.",
 }
+
+// ---------------------------------------------------------------------------
+// Phase IV — Smart AI simulation layer
+// No external API. Keyword detection + contextual replies.
+// ---------------------------------------------------------------------------
+
+/**
+ * Strips intent keywords from the raw message to isolate the task subject.
+ *   "add homework tomorrow" → "homework"
+ *   "urgent meeting today"  → ""  (no subject left)
+ */
+function extractTask(raw: string): string {
+  return raw
+    .replace(
+      /\b(add|create|make|schedule|put|set|today|tomorrow|urgent|homework|meeting|please|a|an|the)\b/gi,
+      ''
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * simulateAI — fake AI brain with keyword detection.
+ *
+ * Detects intent from the user message and returns a contextual reply.
+ * Rules checked in priority order (most specific → most general).
+ * Always returns a non-empty string — never falls through to a backend.
+ *
+ * Recognised keywords: add, today, tomorrow, urgent, homework, meeting
+ */
+function simulateAI(message: string): string {
+  const t = message.toLowerCase()
+  const task = extractTask(message)
+  const label = task || 'this task'
+
+  // --- compound patterns (most specific first) ---
+
+  if (t.includes('add') && t.includes('urgent')) {
+    return `That sounds urgent! Should I create a high-priority task called "${label}"?`
+  }
+
+  if (t.includes('urgent') && t.includes('meeting')) {
+    return `This sounds important. I recommend marking it as high priority.`
+  }
+
+  if (t.includes('add') && t.includes('homework')) {
+    return `I suggest creating a homework task. Should I add it to your list?`
+  }
+
+  if (t.includes('add') && t.includes('meeting')) {
+    return `I can add a meeting task for you. Want me to create it?`
+  }
+
+  if (t.includes('add') && t.includes('today')) {
+    return `Got it! I can add that for today. Want me to create "${label}"?`
+  }
+
+  if (t.includes('add') && t.includes('tomorrow')) {
+    return `I suggest creating a task for tomorrow. Should I add "${label}"?`
+  }
+
+  // --- single keywords ---
+
+  if (t.includes('add')) {
+    return `Sure! Should I create a task called "${label}"?`
+  }
+
+  if (t.includes('urgent')) {
+    return `That sounds important! Would you like me to add this as an urgent task?`
+  }
+
+  if (t.includes('homework')) {
+    return `Sounds like a study task! Want me to add it to your list?`
+  }
+
+  if (t.includes('meeting')) {
+    return `Got it, a meeting! Should I schedule it as a task?`
+  }
+
+  if (t.includes('today')) {
+    return `Would you like me to schedule something for today? Just tell me what to add!`
+  }
+
+  if (t.includes('tomorrow')) {
+    return `Should I create a task for tomorrow? Tell me what you need!`
+  }
+
+  // --- fallback ---
+  return `Tell me more about your task so I can help.`
+}
+
+// Delay (ms) that keeps the "AI is typing…" indicator visible before the reply appears
+const AI_THINKING_DELAY = 700
 
 // ---------------------------------------------------------------------------
 // AI avatar — gradient circle with star icon
@@ -53,7 +143,7 @@ function AiAvatar() {
 // ChatPanel
 // ---------------------------------------------------------------------------
 
-export default function ChatPanel({ token, onClose, onMutation }: ChatPanelProps) {
+export default function ChatPanel({ onClose }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([WELCOME])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -69,33 +159,23 @@ export default function ChatPanel({ token, onClose, onMutation }: ChatPanelProps
     if (!text || loading) return
 
     // Append user bubble immediately
-    const userMsg: Message = { id: Date.now(), role: 'user', content: text }
-    setMessages(prev => [...prev, userMsg])
+    setMessages(prev => [...prev, { id: Date.now(), role: 'user', content: text }])
     setInput('')
-    setLoading(true)
 
-    try {
-      const data = await chatApi.sendMessage(token, text)
-      setMessages(prev => [
-        ...prev,
-        { id: Date.now(), role: 'assistant', content: data.reply },
-      ])
-      // Trigger task list highlight if any mutation tool was called
-      if (data.actions?.some(a => MUTATION_TOOLS.has(a.tool))) {
-        onMutation?.()
-      }
-    } catch (err) {
-      const content =
-        err instanceof ApiError && err.status === 401
-          ? 'Session expired, please sign in again.'
-          : 'Something went wrong. Please try again.'
-      setMessages(prev => [
-        ...prev,
-        { id: Date.now(), role: 'assistant', content },
-      ])
-    } finally {
-      setLoading(false)
-    }
+    // Show typing indicator, simulate AI thinking, then reply locally
+    setLoading(true)
+    await new Promise(resolve => setTimeout(resolve, AI_THINKING_DELAY))
+    setLoading(false)
+
+    setMessages(prev => [
+      ...prev,
+      {
+        id: Date.now(),
+        role: 'assistant',
+        content: simulateAI(text),
+        showAction: text.toLowerCase().includes('add'),
+      },
+    ])
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -153,25 +233,39 @@ export default function ChatPanel({ token, onClose, onMutation }: ChatPanelProps
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
         {messages.map(msg => (
-          <div
-            key={msg.id}
-            className={`msg-in flex items-end gap-2 ${
-              msg.role === 'user' ? 'justify-end' : 'justify-start'
-            }`}
-          >
-            {/* AI avatar — only for assistant messages */}
-            {msg.role === 'assistant' && <AiAvatar />}
-
+          <Fragment key={msg.id}>
+            {/* Message bubble */}
             <div
-              className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
-                msg.role === 'user'
-                  ? 'bg-slate-900 text-white rounded-br-sm dark:bg-white dark:text-slate-900'
-                  : 'bg-slate-100 text-slate-700 rounded-bl-sm dark:bg-zinc-800 dark:text-zinc-200'
+              className={`msg-in flex items-end gap-2 ${
+                msg.role === 'user' ? 'justify-end' : 'justify-start'
               }`}
             >
-              {msg.content}
+              {/* AI avatar — only for assistant messages */}
+              {msg.role === 'assistant' && <AiAvatar />}
+
+              <div
+                className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
+                  msg.role === 'user'
+                    ? 'bg-slate-900 text-white rounded-br-sm dark:bg-white dark:text-slate-900'
+                    : 'bg-slate-100 text-slate-700 rounded-bl-sm dark:bg-zinc-800 dark:text-zinc-200'
+                }`}
+              >
+                {msg.content}
+              </div>
             </div>
-          </div>
+
+            {/* Action button — shown below AI reply when "add" keyword was detected */}
+            {msg.role === 'assistant' && msg.showAction && (
+              <div className="msg-in flex justify-start pl-8">
+                <button
+                  onClick={() => window.dispatchEvent(new Event('open-add-task'))}
+                  className="px-3 py-1.5 text-xs font-medium rounded-xl bg-slate-900 text-white hover:scale-105 active:scale-95 transition-all duration-200 dark:bg-white dark:text-slate-900"
+                >
+                  + Create Task
+                </button>
+              </div>
+            )}
+          </Fragment>
         ))}
 
         {/* Typing indicator — bouncing dots + "AI is typing…" label */}
@@ -193,7 +287,7 @@ export default function ChatPanel({ token, onClose, onMutation }: ChatPanelProps
                   style={{ animationDelay: '300ms' }}
                 />
               </span>
-              <span className="text-[11px] text-slate-400 dark:text-zinc-500 italic">
+              <span className="text-[11px] text-slate-400 dark:bg-zinc-500 italic">
                 AI is typing…
               </span>
             </div>

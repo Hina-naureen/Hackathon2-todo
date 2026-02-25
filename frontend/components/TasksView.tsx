@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import Header from './Header'
 import ChatWidget from './ChatWidget'
 import { Task, tasksApi, ApiError, CreateTaskInput, UpdateTaskInput } from '@/lib/api'
@@ -46,6 +46,13 @@ export default function TasksView({ initialTasks, token, userEmail, userName }: 
       setTaskListHighlighted(true)
       highlightTimer.current = setTimeout(() => setTaskListHighlighted(false), 1400)
     })
+  }, [])
+
+  // Phase V — open Add Task modal when ChatPanel dispatches "open-add-task"
+  useEffect(() => {
+    const open = () => setModal({ type: 'add' })
+    window.addEventListener('open-add-task', open)
+    return () => window.removeEventListener('open-add-task', open)
   }, [])
 
   const showToast = useCallback((msg: string) => {
