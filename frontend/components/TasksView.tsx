@@ -74,6 +74,11 @@ export default function TasksView({ initialTasks, token, userEmail, userName }: 
     return () => window.removeEventListener('ai-create-task', create)
   }, [token])
 
+  // Phase X — callback for AI to open the Add Task modal with a pre-filled title
+  const handleAITaskCreate = useCallback((title: string) => {
+    setModal({ type: 'add', prefillTitle: title })
+  }, [])
+
   const showToast = useCallback((msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(null), 4000)
@@ -236,6 +241,7 @@ export default function TasksView({ initialTasks, token, userEmail, userName }: 
         token={token}
         onMutation={triggerHighlight}
         pendingTaskCount={tasks.filter(t => !t.completed).length}
+        onAITaskCreate={handleAITaskCreate}
       />
     </div>
   )

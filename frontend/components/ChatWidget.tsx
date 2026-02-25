@@ -11,9 +11,10 @@ interface ChatWidgetProps {
   token: string
   onMutation?: () => void
   pendingTaskCount: number
+  onAITaskCreate: (title: string) => void
 }
 
-export default function ChatWidget({ token, onMutation, pendingTaskCount }: ChatWidgetProps) {
+export default function ChatWidget({ token, onMutation, pendingTaskCount, onAITaskCreate }: ChatWidgetProps) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -32,6 +33,7 @@ export default function ChatWidget({ token, onMutation, pendingTaskCount }: Chat
           onClose={() => setOpen(false)}
           onMutation={onMutation}
           pendingTaskCount={pendingTaskCount}
+          onAITaskCreate={onAITaskCreate}
         />
       </div>
 

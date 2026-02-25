@@ -19,6 +19,7 @@ interface ChatPanelProps {
   onClose: () => void
   onMutation?: () => void
   pendingTaskCount: number
+  onAITaskCreate: (title: string) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +136,7 @@ function AiAvatar() {
 // ChatPanel
 // ---------------------------------------------------------------------------
 
-export default function ChatPanel({ onClose, pendingTaskCount }: ChatPanelProps) {
+export default function ChatPanel({ onClose, pendingTaskCount, onAITaskCreate }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -260,13 +261,7 @@ export default function ChatPanel({ onClose, pendingTaskCount }: ChatPanelProps)
             {msg.role === 'assistant' && msg.showAction && (
               <div className="msg-in flex justify-start pl-8">
                 <button
-                  onClick={() =>
-                    window.dispatchEvent(
-                      new CustomEvent('ai-create-task', {
-                        detail: { title: msg.taskTitle ?? '' },
-                      })
-                    )
-                  }
+                  onClick={() => onAITaskCreate(msg.taskTitle ?? '')}
                   className="px-3 py-1.5 text-xs font-medium rounded-xl bg-slate-900 text-white hover:scale-105 active:scale-95 transition-all duration-200 dark:bg-white dark:text-slate-900"
                 >
                   + Create Task
