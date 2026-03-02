@@ -1,0 +1,53 @@
+# dapr/components/kafka-pubsub.yaml — Dapr Pub/Sub component (Apache Kafka)
+# References: specs/phase5-dapr-kafka.md §Dapr Integration Architecture
+#
+# This component registers Kafka as the pub/sub broker for Dapr.
+# The backend sidecar calls:
+#   POST http://localhost:3500/v1.0/publish/kafka-pubsub/task-events
+#
+# Deployment:
+#   kubectl apply -f dapr/components/kafka-pubsub.yaml
+#
+# Prerequisites:
+#   1. Dapr installed in the cluster:
+#      helm repo add dapr https://dapr.github.io/helm-charts
+#      helm install dapr dapr/dapr --namespace dapr-system --create-namespace
+#
+#   2. Kafka running (see k8s/kafka.yaml for dev cluster):
+#      kubectl apply -f k8s/kafka.yaml
+#
+# The `brokers` field uses the Kafka ClusterIP service name.
+# In dev (Minikube):  kafka-service.default.svc.cluster.local:9092
+# In DOKS:            same (or DigitalOcean managed Kafka endpoint)
+
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: kafka-pubsub
+  namespace: default
+spec:
+  type: pubsub.kafka
+  version: v1
+  metadata:
+    # ── Broker address ────────────────────────────────────────────────────────
+    # Points to the Kafka ClusterIP service created in k8s/kafka.yaml.
+    # Change to your managed Kafka bootstrap server for DOKS production.
+    - name: brokers
+      value: "kafka-service.default.svc.cluster.local:9092"
+
+    # ── Authentication ────────────────────────────────────────────────────────
+    # No SASL/TLS for local dev. For production DOKS, inject credentials via
+    # a K8s Secret and reference with secretKeyRef here.
+    - name: authRequired
+      value: "false"
+
+    # ── Consumer group ────────────────────────────────────────────────────────
+    # All backend replicas share the same consumer group for fan-out semantics.
+    - name: consumerGroup
+      value: "todo-app"
+
+    # ── Topic auto-creation ───────────────────────────────────────────────────
+    # Allow Dapr to create the topic on first publish (dev-friendly).
+    # Disable and pre-create topics in production.
+    - name: initialOffset
+      value: "oldest"

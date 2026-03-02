@@ -1,0 +1,147 @@
+# k8s/kafka.yaml — Single-node Apache Kafka (KRaft mode) for development
+# References: specs/phase5-dapr-kafka.md §DOKS Deployment Architecture
+#
+# This manifest runs a single-node Kafka 3.7 cluster in KRaft mode
+# (no ZooKeeper) for local Minikube development and CI.
+#
+# For DOKS production, replace with:
+#   - Strimzi operator: https://strimzi.io/quickstarts/
+#   - DigitalOcean Managed Kafka (when available in your region)
+#
+# Apply: kubectl apply -f k8s/kafka.yaml
+# Verify: kubectl exec -it $(kubectl get pod -l app=kafka -o name) -- \
+#           /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server localhost:9092
+
+---
+# ── ConfigMap: KRaft cluster ID + config ──────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-config
+  labels:
+    app: kafka
+data:
+  KAFKA_NODE_ID: "1"
+  KAFKA_PROCESS_ROLES: "broker,controller"
+  KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka-service:9093"
+  KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+  KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka-service:9092"
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+  KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+  KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+  KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+  KAFKA_LOG_RETENTION_HOURS: "24"
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+  # KRaft cluster ID — must be a valid 22-char base64 UUID
+  CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qg"
+
+---
+# ── Deployment ────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+    tier: messaging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+        tier: messaging
+    spec:
+      containers:
+        - name: kafka
+          # Apache Kafka 3.7 official image (KRaft-ready)
+          image: apache/kafka:3.7.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: broker
+              containerPort: 9092
+            - name: controller
+              containerPort: 9093
+          envFrom:
+            - configMapRef:
+                name: kafka-config
+          # KRaft requires formatting the log directory on first boot
+          command:
+            - sh
+            - -c
+            - |
+              # Format storage if not already formatted
+              if [ ! -f /var/lib/kafka/data/meta.properties ]; then
+                /opt/kafka/bin/kafka-storage.sh format \
+                  -t "$CLUSTER_ID" \
+                  -c /opt/kafka/config/kraft/server.properties
+              fi
+              exec /opt/kafka/bin/kafka-server-start.sh \
+                /opt/kafka/config/kraft/server.properties \
+                --override node.id="$KAFKA_NODE_ID" \
+                --override process.roles="$KAFKA_PROCESS_ROLES" \
+                --override controller.quorum.voters="$KAFKA_CONTROLLER_QUORUM_VOTERS" \
+                --override listeners="$KAFKA_LISTENERS" \
+                --override advertised.listeners="$KAFKA_ADVERTISED_LISTENERS" \
+                --override listener.security.protocol.map="$KAFKA_LISTENER_SECURITY_PROTOCOL_MAP" \
+                --override controller.listener.names="$KAFKA_CONTROLLER_LISTENER_NAMES" \
+                --override inter.broker.listener.name="$KAFKA_INTER_BROKER_LISTENER_NAME" \
+                --override auto.create.topics.enable="$KAFKA_AUTO_CREATE_TOPICS_ENABLE" \
+                --override log.dirs="$KAFKA_LOG_DIRS" \
+                --override log.retention.hours="$KAFKA_LOG_RETENTION_HOURS" \
+                --override offsets.topic.replication.factor="$KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR" \
+                --override transaction.state.log.replication.factor="$KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR" \
+                --override transaction.state.log.min.isr="$KAFKA_TRANSACTION_STATE_LOG_MIN_ISR"
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
+      volumes:
+        - name: kafka-data
+          emptyDir: {}   # ephemeral for dev; replace with PVC for production
+
+---
+# ── Service ───────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-service
+  labels:
+    app: kafka
+spec:
+  type: ClusterIP
+  selector:
+    app: kafka
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 9092
+      protocol: TCP
+    - name: controller
+      port: 9093
+      targetPort: 9093
+      protocol: TCP

@@ -1,0 +1,63 @@
+# helm/todo-app/values-doks.yaml — Phase V: DOKS-specific Helm values override
+# References: specs/phase5-dapr-kafka.md §DOKS Deployment Architecture
+#
+# This file OVERRIDES values.yaml for DigitalOcean Kubernetes (DOKS) deployments.
+# It is committed to git because it contains ZERO secrets.
+# Secrets are still injected at install time via --set or a gitignored file.
+#
+# Usage:
+#   helm upgrade --install todo-app ./helm/todo-app \
+#     -f helm/todo-app/values-doks.yaml \
+#     --set secrets.databaseUrl="$DATABASE_URL" \
+#     --set secrets.betterAuthSecret="$BETTER_AUTH_SECRET" \
+#     --set secrets.openaiApiKey="$OPENAI_API_KEY" \
+#     --set backend.image.repository="registry.digitalocean.com/$DOCR_REGISTRY/todo-backend" \
+#     --set frontend.image.repository="registry.digitalocean.com/$DOCR_REGISTRY/todo-frontend" \
+#     --set backend.image.tag="$IMAGE_TAG" \
+#     --set frontend.image.tag="$IMAGE_TAG" \
+#     --set ingress.host="$YOUR_DOMAIN"
+
+# ── Backend (FastAPI) ──────────────────────────────────────────────────────────
+backend:
+  replicaCount: 1
+  image:
+    # Override at install time with DOCR registry path:
+    #   registry.digitalocean.com/<registry-name>/todo-backend
+    repository: todo-backend          # placeholder — override with --set
+    tag: latest
+    pullPolicy: Always                # Always pull from DOCR (not local daemon)
+  env:
+    authDisabled: "false"
+    # Set ALLOWED_ORIGINS to match your domain at install time:
+    #   --set backend.env.allowedOrigins="https://todo.example.com"
+    allowedOrigins: "https://todo.example.com"
+
+# ── Frontend (Next.js) ────────────────────────────────────────────────────────
+frontend:
+  replicaCount: 1
+  image:
+    # Override at install time with DOCR registry path:
+    #   registry.digitalocean.com/<registry-name>/todo-frontend
+    repository: todo-frontend         # placeholder — override with --set
+    tag: latest
+    pullPolicy: Always
+  env:
+    nodeEnv: "production"
+    # NEXT_PUBLIC_API_URL must match the Ingress hostname (baked in at build time).
+    nextPublicApiUrl: "https://todo.example.com"
+
+# ── Ingress (DigitalOcean Load Balancer via nginx) ────────────────────────────
+# DOKS provisions a DigitalOcean Load Balancer for the nginx Ingress controller.
+# Replace todo.example.com with your actual domain.
+ingress:
+  enabled: true
+  className: "nginx"
+  host: "todo.example.com"           # override with --set ingress.host=<domain>
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    # DigitalOcean LB annotations for HTTPS (cert-manager or DO certificate)
+    # Uncomment when using cert-manager with Let's Encrypt:
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"

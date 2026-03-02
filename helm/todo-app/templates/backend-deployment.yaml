@@ -28,6 +28,14 @@ spec:
         app: {{ .Release.Name }}-backend
         app.kubernetes.io/name: todo-backend
         app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        # ── Phase V: Dapr sidecar injection ──────────────────────────────────
+        # Requires Dapr operator in the cluster. Without it these annotations
+        # are ignored and events.py runs in no-op mode (DAPR_HTTP_PORT unset).
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "todo-backend"
+        dapr.io/app-port: {{ .Values.backend.port | quote }}
+        dapr.io/log-level: "info"
     spec:
       # Prevent the pod from running as root.
       securityContext:

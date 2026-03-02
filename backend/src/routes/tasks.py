@@ -1,6 +1,7 @@
 # src/routes/tasks.py — Task CRUD + toggle route handlers
 # References: specs/api/rest-endpoints.md
 #             specs/database/schema.md §TaskStore DB Adapter
+#             specs/phase5-dapr-kafka.md §Event Schema
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from sqlmodel import Session
 from src.auth.dependencies import get_current_user
 from src.database import DBTaskStore, _utcnow, get_session
 from src.db_models import Task, TaskCreate, TaskRead, TaskUpdate
+from src.events import publish_task_event
 from src.models import MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH
 from src.task_manager import TaskManager
 
@@ -71,6 +73,10 @@ async def create_task(
         task.due_date = body.due_date  # type: ignore[assignment]
     session.commit()
     session.refresh(task)
+    # Phase V — emit domain event after successful DB commit
+    await publish_task_event(
+        "task.created", task.id, user_id, extra={"title": task.title}  # type: ignore[arg-type]
+    )
     return task  # type: ignore[return-value]
 
 
@@ -135,6 +141,10 @@ async def update_task(
     task.updated_at = _utcnow()  # type: ignore[assignment]
     session.commit()
     session.refresh(task)
+    # Phase V — emit domain event
+    await publish_task_event(
+        "task.updated", task.id, user_id, extra={"title": task.title}  # type: ignore[arg-type]
+    )
     return task  # type: ignore[return-value]
 
 
@@ -154,6 +164,8 @@ async def delete_task(
     if not success:
         raise HTTPException(status_code=404, detail=f"Task #{task_id} not found.")
     session.commit()
+    # Phase V — emit domain event
+    await publish_task_event("task.deleted", task_id, user_id)
     return {"detail": f"Task #{task_id} deleted."}
 
 
@@ -176,4 +188,8 @@ async def toggle_task(
     task.updated_at = _utcnow()  # type: ignore[assignment]
     session.commit()
     session.refresh(task)
+    # Phase V — emit domain event
+    await publish_task_event(
+        "task.toggled", task.id, user_id, extra={"completed": task.completed}  # type: ignore[arg-type]
+    )
     return task  # type: ignore[return-value]
