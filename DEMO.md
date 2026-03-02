@@ -1,267 +1,183 @@
-# Demo Script — Phase I Console Todo App
-## 90-Second Walkthrough
+# Demo Script — Evolution of Todo (All 5 Phases)
 
-**Run command:** `uv run todo`
-**Terminal:** Windows Terminal or any 80-col console
-**Font size:** 14–16 px for legibility on screen recording
+> Full-stack AI-powered task manager · Spec-Driven Development · Hackathon II
 
 ---
 
-## Setup Before Recording
+## Quick Demo (3 Minutes)
 
-Clear the terminal, then start fresh:
+**Recommended order for judges:**
+
+| Minute | What to show |
+|--------|-------------|
+| 0:00–0:30 | Sign up → land on task list |
+| 0:30–1:15 | AI chat: create, list, toggle, delete via natural language |
+| 1:15–1:45 | Manual CRUD + due dates |
+| 1:45–2:30 | Swagger docs + health endpoints |
+| 2:30–3:00 | Architecture summary + test count |
+
+---
+
+## Setup
 
 ```bash
-cls
-uv run todo
+# Option 1 — Docker (fastest)
+docker compose up --build
+# App:  http://localhost:3000
+# API:  http://localhost:8000/docs
+
+# Option 2 — Dev servers
+cd backend && uv run uvicorn src.app:app --reload --port 8000
+cd frontend && npm run dev
+```
+
+**Env vars needed (see `.env.example` files):**
+
+```env
+# backend/.env
+DATABASE_URL=postgresql://...neon.tech/neondb?sslmode=require
+BETTER_AUTH_SECRET=<64-char-hex>
+OPENAI_API_KEY=sk-...          # optional — local simulation works without it
+
+# frontend/.env.local
+BETTER_AUTH_SECRET=<same-value>
+NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
 ---
 
-## Script
+## Demo Flow
+
+### 1 — Sign Up
+
+1. Open `http://localhost:3000` → auto-redirected to `/sign-in`
+2. Click **Sign Up** → enter email + password → submit
+3. JWT issued → redirected to `/tasks`
 
 ---
 
-### [0:00 – 0:06] LAUNCH
+### 2 — AI Chat (star feature)
 
-**Action:** Type and press Enter
-
-```
-uv run todo
-```
-
-**Screen shows:**
+Type these in the chat panel (bottom-right):
 
 ```
-  Todo App  -  Phase I  |  Press Ctrl+C to exit
-
-  +--------------------------------------------+
-  |            TODO APP  -  PHASE I            |
-  +--------------------------------------------+
-  |                                            |
-  |  [1]  Add Task                             |
-  |  [2]  View All Tasks                       |
-  |  [3]  Update Task                          |
-  |  [4]  Delete Task                          |
-  |  [5]  Toggle Complete / Incomplete         |
-  |  [0]  Exit                                 |
-  |                                            |
-  +--------------------------------------------+
-  Enter choice [0-5]   :
+"add a task to review the slides tomorrow"
 ```
+→ Task appears in the list with due date set to tomorrow
 
-**Narration:** *"Phase I — a fully spec-driven Python console todo app, zero dependencies, built entirely by Claude Code from formal specifications."*
+```
+"add a meeting with the team on Friday"
+```
+→ Task created, due date = next Friday, no form filled
+
+```
+"show my pending tasks"
+```
+→ AI lists all incomplete tasks
+
+```
+"mark task 1 as done"
+```
+→ Task status flips to complete, list updates instantly
+
+```
+"delete task 2"
+```
+→ Task removed, AI confirms
+
+**Without OPENAI_API_KEY** — local keyword simulation kicks in automatically. Same UX, no external calls.
 
 ---
 
-### [0:06 – 0:24] FEATURE 1 — ADD TASK
+### 3 — Manual CRUD
 
-**Action:** Press `1` → Enter
-
-```
-  >> Add New Task
-  --------------------------------------------
-  Title (required)     :
-```
-
-**Action:** Type title → Enter → Type description → Enter
-
-```
-  Title (required)     : Prepare demo slides
-  Description          : Hackathon II presentation
-  Task #1 added successfully.
-```
-
-**Action:** Press `1` again → add second task
-
-```
-  Title (required)     : Write project README
-  Description          :               ← (press Enter, no description)
-  Task #2 added successfully.
-```
-
-**Action:** Press `1` again → add third task
-
-```
-  Title (required)     : Push code to GitHub
-  Description          :               ← (press Enter)
-  Task #3 added successfully.
-```
-
-**Narration:** *"Add tasks with a required title and optional description. Each gets a unique auto-incremented ID."*
+- **Add:** Click `+` button → fill title → Save
+- **Edit:** Click task → edit inline
+- **Toggle:** Click checkbox
+- **Delete:** Hover → delete icon
 
 ---
 
-### [0:24 – 0:36] FEATURE 2 — VIEW TASKS
+### 4 — API + Health
 
-**Action:** Press `2` → Enter
-
-**Screen shows:**
-
-```
-  ================================================================
-    ID  Status  Title                       Description
-  ----------------------------------------------------------------
-     1  [ ]     Prepare demo slides         Hackathon II present..
-     2  [ ]     Write project README
-     3  [ ]     Push code to GitHub
-  ================================================================
-  3 task(s)
-```
-
-**Narration:** *"View all tasks in a clean table. Status shows `[ ]` for pending."*
+| URL | What to show |
+|-----|-------------|
+| `http://localhost:8000/docs` | Swagger — all endpoints with auth |
+| `http://localhost:8000/health` | `{"status":"ok"}` |
+| `http://localhost:8000/health/db` | `{"status":"ok","dialect":"postgresql"}` |
 
 ---
 
-### [0:36 – 0:52] FEATURE 3 — UPDATE TASK
+### 5 — Tests
 
-**Action:** Press `3` → Enter
-
-```
-  >> Update Task
-  --------------------------------------------
-  Task ID to update    : 1
-  Current title        : Prepare demo slides
-  New title            : Record demo video
-  Current description  : Hackathon II presentation
-  New description      :               ← (press Enter to keep)
-  Task #1 updated successfully.
-```
-
-**Action:** Press `2` to view — confirm the change
-
-```
-  ================================================================
-    ID  Status  Title                       Description
-  ----------------------------------------------------------------
-     1  [ ]     Record demo video           Hackathon II present..
-     2  [ ]     Write project README
-     3  [ ]     Push code to GitHub
-  ================================================================
-```
-
-**Narration:** *"Update any field by ID. Press Enter to keep the existing value — no accidental overwrites."*
-
----
-
-### [0:52 – 1:04] FEATURE 4 — TOGGLE COMPLETE
-
-**Action:** Press `5` → Enter
-
-```
-  >> Toggle Task Status
-  --------------------------------------------
-  Task ID to toggle    : 2
-  Task #2 marked as complete.
-```
-
-**Action:** Press `2` to view — show the `[x]` icon
-
-```
-  ================================================================
-    ID  Status  Title                       Description
-  ----------------------------------------------------------------
-     1  [ ]     Record demo video           Hackathon II present..
-     2  [x]     Write project README
-     3  [ ]     Push code to GitHub
-  ================================================================
-```
-
-**Narration:** *"Toggle any task between `[ ]` pending and `[x]` complete. One keystroke, instant feedback."*
-
----
-
-### [1:04 – 1:20] FEATURE 5 — DELETE TASK
-
-**Action:** Press `4` → Enter
-
-```
-  >> Delete Task
-  --------------------------------------------
-  Task ID to delete    : 3
-  Delete 'Push code to GitHub'? (y/n) : y
-  Task #3 deleted.
-```
-
-**Action:** Press `2` — final view
-
-```
-  ================================================================
-    ID  Status  Title                       Description
-  ----------------------------------------------------------------
-     1  [ ]     Record demo video           Hackathon II present..
-     2  [x]     Write project README
-  ================================================================
-  2 task(s)
-```
-
-**Narration:** *"Delete with a confirmation prompt — no accidental removals. The table updates instantly."*
-
----
-
-### [1:20 – 1:30] CLOSE
-
-**Action:** Press `0` → Enter
-
-```
-  Goodbye!
-```
-
-**Narration:** *"Phase I complete — in-memory, zero dependencies, 107 tests passing. Built spec-first, AI-generated, production-quality structure. Next: Phase II — REST API, database, and authentication."*
-
----
-
-## Full Input Sequence (for one-shot run)
-
-Copy-paste into the terminal to reproduce the entire demo in one session:
-
-```
-1
-Prepare demo slides
-Hackathon II presentation
-1
-Write project README
-
-1
-Push code to GitHub
-
-2
-3
-1
-Record demo video
-
-2
-5
-2
-2
-4
-3
-y
-2
-0
+```bash
+cd backend && uv run pytest tests/ -v
+# 255 tests — auth, CRUD, AI agent, date parsing, Dapr events
 ```
 
 ---
 
-## Timing Reference
+## Architecture (30-second pitch)
 
-| Timestamp | Feature | Duration |
-|-----------|---------|----------|
-| 0:00 – 0:06 | Launch | 6s |
-| 0:06 – 0:24 | Add Task (×3) | 18s |
-| 0:24 – 0:36 | View Tasks | 12s |
-| 0:36 – 0:52 | Update Task | 16s |
-| 0:52 – 1:04 | Toggle Complete | 12s |
-| 1:04 – 1:20 | Delete Task | 16s |
-| 1:20 – 1:30 | Close + outro | 10s |
-| **Total** | | **~90s** |
+```
+Browser (Next.js) → FastAPI → TaskManager (Phase I, unchanged)
+                           → Dapr sidecar → Kafka → task-events topic
+                           → Neon PostgreSQL (Alembic migrations)
+```
+
+**5 Phases of evolution:**
+
+| Phase | Stack |
+|-------|-------|
+| I | Python console app, 0 dependencies |
+| II | Next.js + FastAPI + Neon DB + JWT auth |
+| III | OpenAI function calling + agentic loop + local fallback |
+| IV | Docker + Minikube + Helm chart + nginx Ingress |
+| V | Kafka + Dapr pub/sub + DigitalOcean DOKS |
+
+**Key differentiator:** `TaskManager` from Phase I is untouched across all 5 phases. New layers injected around it — classic hexagonal architecture.
 
 ---
 
-## Recording Tips
+## Kubernetes Demo (Phase IV)
 
-- Set terminal to **80 columns × 30 rows** for consistent framing
-- Type at **medium pace** — not too fast, not too slow; let each confirmation message settle for ~1s before the next keystroke
-- Pause **2 seconds** on the task table after each view to let it register on screen
-- Use **OBS** or **ShareX** (Windows) for recording; crop to the terminal window only
-- Add **narration as voiceover** in post if recording silently during the session
+```bash
+# Automated
+bash scripts/deploy-minikube.sh
+
+# Then open: http://todo.local
+kubectl get pods          # backend 1/1, frontend 1/1
+curl http://todo.local/health   # {"status":"ok"}
+```
+
+---
+
+## Event-Driven Demo (Phase V)
+
+```bash
+# After DOKS deploy (see scripts/deploy-doks.sh)
+
+# Watch Kafka events in real time
+kubectl exec -it $(kubectl get pod -l app=kafka -o name) -- \
+  /opt/kafka/bin/kafka-console-consumer.sh \
+  --topic task-events \
+  --bootstrap-server localhost:9092 \
+  --from-beginning
+
+# Then create a task via UI — event appears:
+# {"event_type":"task.created","task_id":1,"user_id":"...","timestamp":"...","title":"..."}
+```
+
+---
+
+## SDD Evidence (for judges)
+
+| Artifact | Location |
+|---------|---------|
+| Constitution | `.specify/memory/constitution.md` |
+| Phase V Spec | `specs/phase5-dapr-kafka.md` |
+| ADR — K8s decisions | `history/adr/001-phase-iv-kubernetes-deployment-strategy.md` |
+| ADR — Dapr/Kafka | `history/adr/002-phase-v-dapr-kafka-event-bus.md` |
+| Prompt History (61 PHRs) | `history/prompts/general/` |
+
+> Every commit traces to a spec section. Zero manual coding — all code generated by Claude Code from formal specifications.

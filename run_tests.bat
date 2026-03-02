@@ -1,4 +1,5 @@
 @echo off
-cd /d C:\Users\pc\Desktop\Hackathon2-todo\backend
-.venv\Scripts\python.exe -m pytest tests\test_agent.py tests\test_chat.py -v --tb=short
-echo EXIT_CODE=%ERRORLEVEL%
+:: run_tests.bat — Run backend test suite (Windows)
+:: Requires: uv installed (https://docs.astral.sh/uv/)
+cd /d "%~dp0backend"
+uv run pytest tests/ -v
