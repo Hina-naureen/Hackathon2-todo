@@ -1,0 +1,21 @@
+# k8s/frontend-service.yaml
+# References: specs/ui/pages.md §Service Discovery
+#
+# Access (port-forward): kubectl port-forward svc/frontend-service 3000:3000
+# Apply: kubectl apply -f k8s/frontend-service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  labels:
+    app: todo-frontend
+spec:
+  type: ClusterIP
+  selector:
+    app: todo-frontend
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP

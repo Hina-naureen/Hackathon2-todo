@@ -279,3 +279,197 @@ class TestChatAuth:
             )
         assert r.status_code == 401
         assert r.json()["detail"] == "Invalid token."
+
+
+# ---------------------------------------------------------------------------
+# POST /api/chat — today field forwarding
+# References: specs/features/chatbot.md §FR-CHAT-011
+# ---------------------------------------------------------------------------
+
+
+class TestChatTodayField:
+    """Tests for the optional `today` field in ChatRequest."""
+
+    def test_today_field_is_optional(self, client: TestClient):
+        # Request without today must still return 200
+        r = client.post("/api/chat", json={"message": "Hello"})
+        assert r.status_code == 200
+
+    def test_today_field_accepted_in_request(self, client: TestClient):
+        r = client.post("/api/chat", json={"message": "Hello", "today": "2026-03-10"})
+        assert r.status_code == 200
+
+    def test_today_field_null_is_accepted(self, client: TestClient):
+        r = client.post("/api/chat", json={"message": "Hello", "today": None})
+        assert r.status_code == 200
+
+    def test_today_forwarded_to_agent_run(
+        self, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        """today value must reach agent.run() so due_date injection works."""
+        received_today: list = []
+
+        original_run = TaskAgent.run
+
+        async def capturing_run(self_agent, user_message, today=None, dry_run=False):
+            received_today.append(today)
+            return await original_run(self_agent, user_message, today=today, dry_run=dry_run)
+
+        monkeypatch.setattr(TaskAgent, "run", capturing_run)
+        monkeypatch.setattr(TaskAgent, "_call_llm", _fake_llm_simple)
+
+        def _override_session():
+            yield session
+
+        app.dependency_overrides[get_session] = _override_session
+        app.dependency_overrides[get_current_user] = lambda: TEST_USER
+
+        with TestClient(app) as client:
+            client.post("/api/chat", json={"message": "add task", "today": "2026-03-10"})
+        app.dependency_overrides.clear()
+
+        assert received_today == ["2026-03-10"]
+
+
+# ---------------------------------------------------------------------------
+# POST /api/chat — extended tool action tests
+# References: specs/api/chat-endpoint.md §ActionTraceOut
+# ---------------------------------------------------------------------------
+
+
+class TestChatToolActionsExtended:
+    """Action trace tests for list_tasks, toggle_complete, delete_task."""
+
+    def _setup(self, monkeypatch, session, tool_name, tool_args):
+        """Wire a fake LLM that calls one tool then stops."""
+        from agents.agent import LLMToolCall
+
+        call_count = 0
+
+        async def fake_llm(self_agent: TaskAgent, messages: list) -> LLMMessage:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return LLMMessage(
+                    content=None,
+                    stop_reason="tool_calls",
+                    tool_calls=[LLMToolCall(id="tc1", name=tool_name, args=tool_args)],
+                )
+            return LLMMessage(content="Done!", stop_reason="stop")
+
+        monkeypatch.setattr(TaskAgent, "_call_llm", fake_llm)
+
+        def _override_session():
+            yield session
+
+        app.dependency_overrides[get_session] = _override_session
+        app.dependency_overrides[get_current_user] = lambda: TEST_USER
+
+    def test_list_tasks_action_recorded(
+        self, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        self._setup(monkeypatch, session, "list_tasks", {})
+        with TestClient(app) as client:
+            r = client.post("/api/chat", json={"message": "list my tasks"})
+        app.dependency_overrides.clear()
+
+        assert r.status_code == 200
+        actions = r.json()["actions"]
+        assert len(actions) == 1
+        assert actions[0]["tool"] == "list_tasks"
+        assert "tasks" in actions[0]["result"]
+
+    def test_list_pending_filter_passed_to_tool(
+        self, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        self._setup(monkeypatch, session, "list_tasks", {"filter": "pending"})
+        with TestClient(app) as client:
+            r = client.post("/api/chat", json={"message": "show pending tasks"})
+        app.dependency_overrides.clear()
+
+        actions = r.json()["actions"]
+        assert actions[0]["args"].get("filter") == "pending"
+
+    def test_toggle_complete_action_recorded(
+        self, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        from agents.tools import create_task
+
+        task = create_task(session, TEST_USER, "test task")
+        task_id = task["id"]
+        self._setup(monkeypatch, session, "toggle_complete", {"id": task_id})
+
+        with TestClient(app) as client:
+            r = client.post("/api/chat", json={"message": f"complete task {task_id}"})
+        app.dependency_overrides.clear()
+
+        assert r.status_code == 200
+        actions = r.json()["actions"]
+        assert actions[0]["tool"] == "toggle_complete"
+        assert actions[0]["result"]["completed"] is True
+
+    def test_delete_task_action_recorded(
+        self, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        from agents.tools import create_task
+
+        task = create_task(session, TEST_USER, "to be deleted")
+        task_id = task["id"]
+        self._setup(monkeypatch, session, "delete_task", {"id": task_id})
+
+        with TestClient(app) as client:
+            r = client.post("/api/chat", json={"message": f"delete task {task_id}"})
+        app.dependency_overrides.clear()
+
+        assert r.status_code == 200
+        actions = r.json()["actions"]
+        assert actions[0]["tool"] == "delete_task"
+        assert actions[0]["result"]["deleted"] is True
+
+    def test_multiple_actions_all_recorded(
+        self, session: Session, monkeypatch: pytest.MonkeyPatch
+    ):
+        """If LLM calls two tools in sequence, both appear in actions list."""
+        from agents.agent import LLMToolCall
+        from agents.tools import create_task
+
+        task = create_task(session, TEST_USER, "multi-step task")
+        task_id = task["id"]
+
+        call_count = 0
+
+        async def fake_llm_two_tools(self_agent: TaskAgent, messages: list) -> LLMMessage:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return LLMMessage(
+                    content=None,
+                    stop_reason="tool_calls",
+                    tool_calls=[LLMToolCall(id="tc1", name="list_tasks", args={})],
+                )
+            if call_count == 2:
+                return LLMMessage(
+                    content=None,
+                    stop_reason="tool_calls",
+                    tool_calls=[
+                        LLMToolCall(id="tc2", name="toggle_complete", args={"id": task_id})
+                    ],
+                )
+            return LLMMessage(content="All done!", stop_reason="stop")
+
+        monkeypatch.setattr(TaskAgent, "_call_llm", fake_llm_two_tools)
+
+        def _override_session():
+            yield session
+
+        app.dependency_overrides[get_session] = _override_session
+        app.dependency_overrides[get_current_user] = lambda: TEST_USER
+
+        with TestClient(app) as client:
+            r = client.post("/api/chat", json={"message": "list then complete"})
+        app.dependency_overrides.clear()
+
+        assert r.status_code == 200
+        tools_called = [a["tool"] for a in r.json()["actions"]]
+        assert "list_tasks" in tools_called
+        assert "toggle_complete" in tools_called

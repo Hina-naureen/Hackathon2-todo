@@ -1,0 +1,92 @@
+# helm/todo-app/templates/backend-deployment.yaml
+# References: specs/architecture.md §Phase IV Layer Diagram
+#             specs/api/rest-endpoints.md §Service Discovery
+#
+# Secret injection strategy:
+#   All sensitive env vars use secretKeyRef pointing to the Secret created
+#   in templates/secrets.yaml. They are NEVER set as plain values here.
+#   This prevents secrets from appearing in `kubectl describe pod` output,
+#   Helm release metadata, and Kubernetes audit logs.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-backend
+  labels:
+    app.kubernetes.io/name: todo-backend
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: backend
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-backend
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-backend
+        app.kubernetes.io/name: todo-backend
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      # Prevent the pod from running as root.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.backend.port }}
+              protocol: TCP
+          env:
+            # ── Non-sensitive configuration ──────────────────────────────────
+            # UV_CACHE_DIR: appuser created with --no-create-home, so uv cannot
+            # write to ~/.cache/uv. Redirect to /app/.cache/uv (owned by appuser).
+            - name: UV_CACHE_DIR
+              value: "/app/.cache/uv"
+            - name: AUTH_DISABLED
+              value: {{ .Values.backend.env.authDisabled | quote }}
+            - name: ALLOWED_ORIGINS
+              value: {{ .Values.backend.env.allowedOrigins | quote }}
+            # ── Secrets — injected from K8s Secret, never from values.yaml ──
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: DATABASE_URL
+            - name: BETTER_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: BETTER_AUTH_SECRET
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: OPENAI_API_KEY
+          # Readiness: only accept traffic when FastAPI is up and responding.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.backend.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          # Liveness: restart the pod if FastAPI stops responding.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.backend.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

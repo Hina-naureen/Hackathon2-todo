@@ -35,3 +35,4 @@ frontend/.data/
 # OS
 .DS_Store
 Thumbs.db
+minikube-linux-amd64

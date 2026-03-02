@@ -1,0 +1,21 @@
+# k8s/backend-service.yaml
+# References: specs/api/rest-endpoints.md §Service Discovery
+#
+# Access (port-forward): kubectl port-forward svc/backend-service 8000:8000
+# Apply: kubectl apply -f k8s/backend-service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  labels:
+    app: todo-backend
+spec:
+  type: ClusterIP
+  selector:
+    app: todo-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP

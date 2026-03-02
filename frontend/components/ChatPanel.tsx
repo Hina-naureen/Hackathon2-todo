@@ -6,13 +6,21 @@ import { useState, useRef, useEffect, Fragment } from 'react'
 // Types
 // ---------------------------------------------------------------------------
 
+interface PendingTask {
+  title: string
+  due_date?: string
+  description?: string
+}
+
 interface Message {
   id: number
   role: 'user' | 'assistant'
   content: string
-  showAction?: boolean   // true when the "add" keyword was detected — renders Create Task button
-  taskTitle?: string     // extracted task subject — sent as prefillTitle to the modal
-  priority?: 'high' | 'medium' | 'normal'  // detected from urgency/time keywords
+  pendingTask?: PendingTask   // task preview — shows "Create Task" button
+  taskCreated?: boolean       // true after the user confirms task creation
+  showAction?: boolean        // legacy fallback flag
+  taskTitle?: string
+  priority?: 'high' | 'medium' | 'normal'
 }
 
 interface ChatPanelProps {
@@ -24,14 +32,20 @@ interface ChatPanelProps {
 }
 
 // ---------------------------------------------------------------------------
-// Phase IV — Smart AI simulation layer
-// No external API. Keyword detection + contextual replies.
+// Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Returns true when the message looks like a task-creation request.
+ * Used to decide whether to send confirm:false to the backend.
+ */
+function isCreateIntent(msg: string): boolean {
+  return /\b(add|create|make|new|schedule|remind)\b/i.test(msg)
+}
 
 /**
  * Strips intent keywords from the raw message to isolate the task subject.
  *   "add homework tomorrow" → "homework"
- *   "urgent meeting today"  → ""  (no subject left)
  */
 function extractTask(raw: string): string {
   return raw
@@ -43,82 +57,23 @@ function extractTask(raw: string): string {
     .trim()
 }
 
-/**
- * simulateAI — fake AI brain with keyword detection.
- *
- * Detects intent from the user message and returns a contextual reply.
- * Rules checked in priority order (most specific → most general).
- * Always returns a non-empty string — never falls through to a backend.
- *
- * Recognised keywords: add, today, tomorrow, urgent, homework, meeting
- */
 function simulateAI(message: string): string {
   const t = message.toLowerCase()
   const task = extractTask(message)
   const label = task || 'this task'
 
-  // --- compound patterns (most specific first) ---
-
-  if (t.includes('add') && t.includes('urgent')) {
-    return `That sounds urgent! Should I create a high-priority task called "${label}"?`
-  }
-
-  if (t.includes('urgent') && t.includes('meeting')) {
-    return `This sounds important. I recommend marking it as high priority.`
-  }
-
-  if (t.includes('add') && t.includes('homework')) {
-    return `I suggest creating a homework task. Should I add it to your list?`
-  }
-
-  if (t.includes('add') && t.includes('meeting')) {
-    return `I can add a meeting task for you. Want me to create it?`
-  }
-
-  if (t.includes('add') && t.includes('today')) {
-    return `Got it! I can add that for today. Want me to create "${label}"?`
-  }
-
-  if (t.includes('add') && t.includes('tomorrow')) {
-    return `I suggest creating a task for tomorrow. Should I add "${label}"?`
-  }
-
-  // --- single keywords ---
-
-  if (t.includes('add')) {
-    return `Sure! Should I create a task called "${label}"?`
-  }
-
-  if (t.includes('urgent')) {
-    return `That sounds important! Would you like me to add this as an urgent task?`
-  }
-
-  if (t.includes('homework')) {
-    return `Sounds like a study task! Want me to add it to your list?`
-  }
-
-  if (t.includes('meeting')) {
-    return `Got it, a meeting! Should I schedule it as a task?`
-  }
-
-  if (t.includes('today')) {
-    return `Would you like me to schedule something for today? Just tell me what to add!`
-  }
-
-  if (t.includes('tomorrow')) {
-    return `Should I create a task for tomorrow? Tell me what you need!`
-  }
-
-  // --- fallback ---
+  if (t.includes('add') && t.includes('urgent')) return `That sounds urgent! I'll prepare a high-priority task called "${label}".`
+  if (t.includes('add') && t.includes('meeting')) return `I can add a meeting task for you.`
+  if (t.includes('add') && t.includes('today')) return `Got it! I'll add "${label}" for today.`
+  if (t.includes('add') && t.includes('tomorrow')) return `I'll prepare a task for tomorrow called "${label}".`
+  if (t.includes('add')) return `Ready to create a task called "${label}".`
+  if (t.includes('urgent')) return `That sounds important! Would you like me to add this as an urgent task?`
+  if (t.includes('meeting')) return `Got it, a meeting! Should I schedule it as a task?`
+  if (t.includes('today')) return `Would you like me to schedule something for today?`
+  if (t.includes('tomorrow')) return `Should I create a task for tomorrow?`
   return `Tell me more about your task so I can help.`
 }
 
-/**
- * detectPriority — maps time/urgency keywords to a priority level.
- *   "urgent" | "today"    → high
- *   "tomorrow" | "homework" → medium
- *   everything else         → normal
- */
 function detectPriority(text: string): 'high' | 'medium' | 'normal' {
   const t = text.toLowerCase()
   if (t.includes('today') || t.includes('urgent')) return 'high'
@@ -126,14 +81,22 @@ function detectPriority(text: string): 'high' | 'medium' | 'normal' {
   return 'normal'
 }
 
-// Delay (ms) used only when falling back to local simulation
-const AI_THINKING_DELAY = 700
+/** Format ISO date string for display: "2026-03-06T09:00:00" → "Fri, 6 Mar" */
+function formatDueDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString('en-GB', {
+      weekday: 'short', day: 'numeric', month: 'short',
+    })
+  } catch {
+    return iso.slice(0, 10)
+  }
+}
 
-// Tools that mutate the task list — trigger a refresh when any of these run
+const AI_THINKING_DELAY = 700
 const MUTATION_TOOLS = new Set(['create_task', 'update_task', 'delete_task', 'toggle_complete'])
 
 // ---------------------------------------------------------------------------
-// AI avatar — gradient circle with star icon
+// AI avatar
 // ---------------------------------------------------------------------------
 
 function AiAvatar() {
@@ -157,9 +120,10 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [creatingId, setCreatingId] = useState<number | null>(null) // which msg has in-flight create
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Phase IX — smart greeting on mount based on current task state
+  // Smart greeting on mount
   useEffect(() => {
     const content =
       pendingTaskCount > 0
@@ -168,23 +132,68 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
     setMessages([{ id: Date.now(), role: 'assistant', content }])
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-scroll to latest message
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
+  // ── Create Task button handler ──────────────────────────────────────────
+  async function handleCreateTask(msgId: number, task: PendingTask) {
+    setCreatingId(msgId)
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+      const res = await fetch(`${apiUrl}/api/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: task.title,
+          description: task.description ?? '',
+          ...(task.due_date ? { due_date: task.due_date } : {}),
+        }),
+      })
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+      // Mark message as confirmed (hide the button, update reply text)
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === msgId
+            ? {
+                ...m,
+                content: `Task "${task.title}" added to your list!`,
+                pendingTask: undefined,
+                taskCreated: true,
+              }
+            : m
+        )
+      )
+      onMutation?.()
+    } catch {
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === msgId ? { ...m, content: `Failed to create task. Please try again.` } : m
+        )
+      )
+    } finally {
+      setCreatingId(null)
+    }
+  }
+
+  // ── Send handler ────────────────────────────────────────────────────────
   async function handleSend() {
     const text = input.trim()
     if (!text || loading) return
 
-    // Append user bubble immediately
     setMessages(prev => [...prev, { id: Date.now(), role: 'user', content: text }])
     setInput('')
     setLoading(true)
 
     try {
-      // --- Real backend call via POST /api/chat ---
       const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+      const createIntent = isCreateIntent(text)
+
       const res = await fetch(`${apiUrl}/api/chat`, {
         method: 'POST',
         headers: {
@@ -193,36 +202,51 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
         },
         body: JSON.stringify({
           message: text,
-          // Provide today's date so the agent can resolve relative phrases
-          // like "tomorrow" or "next Friday" without ambiguity.
           today: new Date().toISOString().split('T')[0],
+          // Preview mode for create intents — backend extracts without persisting
+          confirm: !createIntent,
         }),
       })
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
-      const data = await res.json() as { reply: string; actions: { tool: string }[] }
+      const data = await res.json() as {
+        reply: string
+        actions: { tool: string }[]
+        pending_task?: PendingTask
+      }
 
-      // Refresh task list when the agent mutated any tasks
+      // Non-create actions (list, delete, toggle) → refresh task list
       if (data.actions.some(a => MUTATION_TOOLS.has(a.tool))) {
         onMutation?.()
       }
 
       setMessages(prev => [
         ...prev,
-        { id: Date.now(), role: 'assistant', content: data.reply },
+        {
+          id: Date.now(),
+          role: 'assistant',
+          content: data.reply,
+          pendingTask: data.pending_task ?? undefined,
+        },
       ])
     } catch {
-      // --- Fallback: local keyword simulation (no network / no key) ---
+      // ── Fallback: local simulation ──────────────────────────────────────
       await new Promise(resolve => setTimeout(resolve, AI_THINKING_DELAY))
+      const createIntent = isCreateIntent(text)
+      const taskTitle = extractTask(text)
+
       setMessages(prev => [
         ...prev,
         {
           id: Date.now(),
           role: 'assistant',
           content: simulateAI(text),
-          showAction: text.toLowerCase().includes('add'),
-          taskTitle: extractTask(text),
+          // For create intents, show a pending task card even in fallback mode
+          pendingTask: createIntent && taskTitle ? { title: taskTitle[0].toUpperCase() + taskTitle.slice(1) } : undefined,
+          // Legacy fallback for onAITaskCreate modal (kept for non-create intents)
+          showAction: !createIntent && text.toLowerCase().includes('add'),
+          taskTitle,
           priority: detectPriority(text),
         },
       ])
@@ -241,12 +265,9 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
   return (
     <div className="flex flex-col w-80 h-115 rounded-2xl backdrop-blur-md bg-white/90 border border-violet-200/50 shadow-[0_8px_32px_rgba(139,92,246,0.12),0_2px_8px_rgba(0,0,0,0.08)] overflow-hidden dark:bg-zinc-900/90 dark:border-violet-800/30 dark:shadow-[0_8px_32px_rgba(139,92,246,0.18),0_2px_8px_rgba(0,0,0,0.3)]">
 
-      {/* Gradient header bar — Phase III Preview */}
+      {/* Header */}
       <div className="relative flex items-center justify-between px-4 py-3 bg-linear-to-r from-violet-600 via-purple-600 to-blue-600 overflow-hidden">
-        {/* Subtle shine */}
         <div className="absolute inset-0 bg-white/10" aria-hidden="true" />
-
-        {/* Left: pulsing dot + title + subtitle */}
         <div className="relative flex items-center gap-2.5">
           <span className="relative flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75" />
@@ -259,24 +280,12 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
             </p>
           </div>
         </div>
-
-        {/* Right: close button */}
         <button
           onClick={onClose}
           className="relative p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/20 transition-colors"
           aria-label="Close chat"
         >
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
@@ -288,14 +297,8 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
         {messages.map(msg => (
           <Fragment key={msg.id}>
             {/* Message bubble */}
-            <div
-              className={`msg-in flex items-end gap-2 ${
-                msg.role === 'user' ? 'justify-end' : 'justify-start'
-              }`}
-            >
-              {/* AI avatar — only for assistant messages */}
+            <div className={`msg-in flex items-end gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               {msg.role === 'assistant' && <AiAvatar />}
-
               <div
                 className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
                   msg.role === 'user'
@@ -307,8 +310,60 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
               </div>
             </div>
 
-            {/* Action button — shown below AI reply when "add" keyword was detected */}
-            {msg.role === 'assistant' && msg.showAction && (
+            {/* ── Pending task preview card ──────────────────────────────── */}
+            {msg.role === 'assistant' && msg.pendingTask && !msg.taskCreated && (
+              <div className="msg-in flex justify-start pl-8">
+                <div className="rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-950/40 dark:border-violet-700/50 px-3 py-2.5 flex flex-col gap-2 w-48">
+                  {/* Task info */}
+                  <div className="flex flex-col gap-0.5">
+                    <p className="text-xs font-semibold text-slate-800 dark:text-zinc-100 leading-tight">
+                      {msg.pendingTask.title}
+                    </p>
+                    {msg.pendingTask.due_date && (
+                      <p className="text-[11px] text-violet-600 dark:text-violet-400 flex items-center gap-1">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                          <line x1="16" y1="2" x2="16" y2="6" />
+                          <line x1="8" y1="2" x2="8" y2="6" />
+                          <line x1="3" y1="10" x2="21" y2="10" />
+                        </svg>
+                        {formatDueDate(msg.pendingTask.due_date)}
+                      </p>
+                    )}
+                    <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wide">
+                      Pending
+                    </span>
+                  </div>
+
+                  {/* Create Task button */}
+                  <button
+                    onClick={() => handleCreateTask(msg.id, msg.pendingTask!)}
+                    disabled={creatingId === msg.id}
+                    className="w-full py-1.5 text-xs font-semibold rounded-lg bg-violet-600 text-white hover:bg-violet-700 active:scale-95 transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+                  >
+                    {creatingId === msg.id ? (
+                      <>
+                        <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round" />
+                        </svg>
+                        Adding…
+                      </>
+                    ) : (
+                      <>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="12" y1="5" x2="12" y2="19" />
+                          <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                        Create Task
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Legacy showAction button (non-create fallback) */}
+            {msg.role === 'assistant' && msg.showAction && !msg.pendingTask && (
               <div className="msg-in flex justify-start pl-8">
                 <button
                   onClick={() => onAITaskCreate(msg.taskTitle ?? '', msg.priority ?? 'normal')}
@@ -321,7 +376,7 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
           </Fragment>
         ))}
 
-        {/* Typing indicator — driven by existing loading state, no new state added */}
+        {/* Typing indicator */}
         {loading && (
           <div className="flex gap-1 px-3 py-2">
             <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
@@ -351,17 +406,7 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
             className="w-9 h-9 flex items-center justify-center rounded-xl bg-linear-to-br from-violet-600 to-purple-600 text-white hover:opacity-90 disabled:opacity-40 transition-all duration-200 hover:scale-105 shadow-sm"
             aria-label="Send message"
           >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <line x1="12" y1="19" x2="12" y2="5" />
               <polyline points="5 12 12 5 19 12" />
             </svg>

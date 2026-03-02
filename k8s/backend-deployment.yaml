@@ -1,0 +1,91 @@
+# k8s/backend-deployment.yaml
+# References: specs/overview.md §Repository Structure
+#             specs/api/rest-endpoints.md §CORS Configuration
+#
+# Prerequisites (Minikube):
+#   eval $(minikube docker-env)           # Linux/Mac/Git-Bash
+#   & minikube docker-env --shell powershell | Invoke-Expression  # Windows PS
+#   docker build -t todo-backend:latest ./backend
+#
+# Create secret first (see deploy-minikube.sh):
+#   kubectl create secret generic todo-secrets \
+#     --from-literal=DATABASE_URL="..." \
+#     --from-literal=BETTER_AUTH_SECRET="..." \
+#     --from-literal=OPENAI_API_KEY="" \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#
+# Apply: kubectl apply -f k8s/backend-deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    app: todo-backend
+    tier: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: todo-backend
+  template:
+    metadata:
+      labels:
+        app: todo-backend
+        tier: api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: backend
+          image: todo-backend:latest
+          imagePullPolicy: Never          # use Minikube's local Docker daemon
+          ports:
+            - containerPort: 8000
+          env:
+            # ── Non-sensitive configuration ────────────────────────────────
+            - name: UV_CACHE_DIR
+              value: "/app/.cache/uv"
+            - name: AUTH_DISABLED
+              value: "false"
+            - name: ALLOWED_ORIGINS
+              value: "http://todo.local,http://localhost:3000"
+            # ── Secrets — injected from K8s Secret, never hardcoded ───────
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: todo-secrets
+                  key: DATABASE_URL
+            - name: BETTER_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: todo-secrets
+                  key: BETTER_AUTH_SECRET
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: todo-secrets
+                  key: OPENAI_API_KEY
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

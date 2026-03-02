@@ -1,0 +1,76 @@
+# helm/todo-app/templates/frontend-deployment.yaml
+# References: specs/ui/pages.md §Production Build
+#             specs/architecture.md §Phase IV Layer Diagram
+#
+# BETTER_AUTH_SECRET must match the backend's value exactly —
+# the frontend middleware and backend JWT decoder share the same secret.
+# It is injected from the same K8s Secret used by the backend deployment.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-frontend
+  labels:
+    app.kubernetes.io/name: todo-frontend
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: frontend
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-frontend
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-frontend
+        app.kubernetes.io/name: todo-frontend
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: frontend
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.frontend.port }}
+              protocol: TCP
+          env:
+            # ── Non-sensitive configuration ──────────────────────────────────
+            - name: NODE_ENV
+              value: {{ .Values.frontend.env.nodeEnv | quote }}
+            # NEXT_PUBLIC_API_URL is normally baked in at build time (Dockerfile ARG).
+            # Setting it here as a runtime env var provides an override path for
+            # Helm-managed deployments without requiring an image rebuild.
+            - name: NEXT_PUBLIC_API_URL
+              value: {{ .Values.frontend.env.nextPublicApiUrl | quote }}
+            # ── Secrets — injected from K8s Secret ───────────────────────────
+            - name: BETTER_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: BETTER_AUTH_SECRET
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.frontend.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.frontend.port }}
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

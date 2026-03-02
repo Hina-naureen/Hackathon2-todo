@@ -1,0 +1,71 @@
+# k8s/ingress.yaml
+# References: specs/architecture.md §Phase IV Layer Diagram
+#
+# nginx Ingress — single hostname, path-based routing:
+#   todo.local/api/*    → backend ClusterIP :8000  (FastAPI)
+#   todo.local/health   → backend ClusterIP :8000  (health check)
+#   todo.local/docs     → backend ClusterIP :8000  (Swagger UI)
+#   todo.local/*        → frontend ClusterIP :3000 (Next.js)
+#
+# Prerequisites:
+#   minikube addons enable ingress
+#
+# Add to hosts file:
+#   Linux/Mac:  echo "$(minikube ip)  todo.local" | sudo tee -a /etc/hosts
+#   Windows:    Add "<minikube-ip>  todo.local" to C:\Windows\System32\drivers\etc\hosts
+#
+# Apply: kubectl apply -f k8s/ingress.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: todo-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: todo.local
+      http:
+        paths:
+          # ── Backend: all /api/* routes (FastAPI) ──────────────────────────
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 8000
+          # ── Backend: health endpoints ──────────────────────────────────────
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 8000
+          # ── Backend: Swagger UI ────────────────────────────────────────────
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 8000
+          - path: /openapi.json
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 8000
+          # ── Frontend: everything else (Next.js catch-all) ─────────────────
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 3000

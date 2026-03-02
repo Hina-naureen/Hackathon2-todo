@@ -1,0 +1,73 @@
+# k8s/frontend-deployment.yaml
+# References: specs/overview.md §Repository Structure
+#             specs/ui/pages.md §Production Build
+#
+# Prerequisites (Minikube):
+#   eval $(minikube docker-env)           # Linux/Mac/Git-Bash
+#   & minikube docker-env --shell powershell | Invoke-Expression  # Windows PS
+#   docker build \
+#     --build-arg NEXT_PUBLIC_API_URL=http://todo.local \
+#     --build-arg NEXT_PUBLIC_APP_URL=http://todo.local \
+#     -t todo-frontend:latest ./frontend
+#
+# Apply: kubectl apply -f k8s/frontend-deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  labels:
+    app: todo-frontend
+    tier: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: todo-frontend
+  template:
+    metadata:
+      labels:
+        app: todo-frontend
+        tier: web
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: frontend
+          image: todo-frontend:latest
+          imagePullPolicy: Never          # use Minikube's local Docker daemon
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: NEXT_PUBLIC_API_URL
+              value: "http://todo.local"
+            # ── Secret — must match backend's BETTER_AUTH_SECRET exactly ──
+            - name: BETTER_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: todo-secrets
+                  key: BETTER_AUTH_SECRET
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

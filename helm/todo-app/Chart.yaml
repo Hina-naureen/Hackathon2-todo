@@ -1,0 +1,16 @@
+# helm/todo-app/Chart.yaml
+# References: specs/overview.md §Repository Structure
+
+apiVersion: v2
+name: todo-app
+description: Evolution of Todo — Full-stack AI Todo chatbot (Next.js + FastAPI)
+type: application
+version: 0.1.0
+appVersion: "2.0.0"
+keywords:
+  - todo
+  - fastapi
+  - nextjs
+  - ai-chatbot
+maintainers:
+  - name: Hackathon II Team

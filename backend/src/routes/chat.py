@@ -34,6 +34,9 @@ class ChatRequest(BaseModel):
     # Optional: YYYY-MM-DD string from the client so the agent can resolve
     # relative date phrases ("tomorrow", "next Friday") without ambiguity.
     today: str | None = None
+    # When False, create_task is intercepted and returned as pending_task
+    # without persisting — lets the frontend show a confirmation button.
+    confirm: bool = True
 
 
 class ActionTraceOut(BaseModel):
@@ -56,6 +59,10 @@ class ChatResponse(BaseModel):
     reply: str
     trace_id: str
     actions: list[ActionTraceOut]
+    # Populated when confirm=False and a create_task intent was detected.
+    # Contains {title, description?, due_date?} for the frontend to render
+    # a confirmation card without having persisted the task yet.
+    pending_task: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +93,9 @@ async def chat(
     actions: list[ActionTrace] = []
     try:
         agent = TaskAgent(session, user_id)
-        reply, actions = await agent.run(message, today=body.today)
+        reply, actions = await agent.run(
+            message, today=body.today, dry_run=not body.confirm
+        )
     except Exception as exc:
         logger.error("Agent failed for user %s — falling back to echo: %s", user_id, exc)
         reply = f"You said: {message}"
@@ -98,4 +107,5 @@ async def chat(
             ActionTraceOut(tool=a.tool, args=a.args, result=a.result)
             for a in actions
         ],
+        pending_task=agent.pending_task,
     )

@@ -1,0 +1,95 @@
+# helm/todo-app/templates/ingress.yaml
+# References: specs/architecture.md §Phase IV Layer Diagram
+#
+# nginx Ingress — single hostname, path-based routing:
+#
+#   todo.local/api/*  → backend ClusterIP :8000  (FastAPI)
+#   todo.local/*      → frontend ClusterIP :3000 (Next.js)
+#
+# Path routing rationale:
+#   FastAPI registers all application routes under /api/tasks and /api/chat.
+#   The health endpoints (/health, /health/db) and /docs also need backend
+#   routing, so the prefix match /api covers all backend routes correctly.
+#   Next.js App Router handles everything else, including /tasks, /(auth)/,
+#   and the root redirect.
+#
+# Prerequisites (Minikube):
+#   minikube addons enable ingress
+#   minikube addons enable ingress-dns   # optional: auto /etc/hosts
+#
+# /etc/hosts entry required (or use ingress-dns):
+#   echo "$(minikube ip)  todo.local" | sudo tee -a /etc/hosts
+#
+# Conditional rendering: set ingress.enabled=false to skip this resource
+# (e.g. when deploying to a cluster that uses a different gateway mechanism).
+
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-ingress
+  labels:
+    app.kubernetes.io/name: todo-app
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: ingress
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+  annotations:
+    # Ingress class: nginx (standard on Minikube and most managed clusters).
+    kubernetes.io/ingress.class: "nginx"
+    # Increase body size limit for API requests (default nginx is 1m).
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ index .Values.ingress.annotations "nginx.ingress.kubernetes.io/proxy-body-size" | default "1m" | quote }}
+    # Timeout extensions for AI agent calls (OpenAI upstream latency).
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ index .Values.ingress.annotations "nginx.ingress.kubernetes.io/proxy-read-timeout" | default "60" | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ index .Values.ingress.annotations "nginx.ingress.kubernetes.io/proxy-send-timeout" | default "60" | quote }}
+    # CORS is handled by FastAPI's CORSMiddleware — do not add nginx CORS headers.
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          # ── Backend: all /api/* routes ─────────────────────────────────────
+          # PathType Prefix: matches /api, /api/, /api/tasks, /api/chat, etc.
+          # Also covers /health and /docs because FastAPI serves them at root,
+          # but all app traffic is under /api — health checks use direct svc
+          # calls from liveness/readiness probes inside the cluster.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-backend-service
+                port:
+                  number: {{ .Values.backend.service.port }}
+          # ── Backend: Swagger UI and OpenAPI schema ─────────────────────────
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-backend-service
+                port:
+                  number: {{ .Values.backend.service.port }}
+          - path: /openapi.json
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-backend-service
+                port:
+                  number: {{ .Values.backend.service.port }}
+          # ── Backend: health endpoints ──────────────────────────────────────
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-backend-service
+                port:
+                  number: {{ .Values.backend.service.port }}
+          # ── Frontend: everything else ──────────────────────────────────────
+          # Must be last — Prefix "/" is the catch-all.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-frontend-service
+                port:
+                  number: {{ .Values.frontend.service.port }}
+{{- end }}

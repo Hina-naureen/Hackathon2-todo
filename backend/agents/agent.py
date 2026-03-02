@@ -82,6 +82,7 @@ class TaskAgent:
     def __init__(self, session: Session, user_id: str) -> None:
         self._session = session
         self._user_id = user_id
+        self.pending_task: dict | None = None  # populated when dry_run intercepts create_task
 
     # ------------------------------------------------------------------
     # LLM interface — thin wrapper around OpenAI; mockable in tests
@@ -268,6 +269,20 @@ class TaskAgent:
                     title = re.sub(
                         r"\btoday\b", "", title, flags=re.IGNORECASE
                     ).strip()
+                else:
+                    # Handle weekday names: monday, tuesday, ..., sunday
+                    weekdays = {
+                        "monday": 0, "tuesday": 1, "wednesday": 2,
+                        "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
+                    }
+                    for day_name, day_num in weekdays.items():
+                        if re.search(rf"\b{day_name}\b", lower):
+                            days_ahead = (day_num - td.weekday()) % 7 or 7
+                            due_date = (td + timedelta(days=days_ahead)).isoformat() + "T09:00:00"
+                            title = re.sub(
+                                rf"\b{day_name}\b", "", title, flags=re.IGNORECASE
+                            ).strip()
+                            break
 
                 # Extract explicit time "at 2 PM" / "at 14:00"
                 time_match = re.search(
@@ -381,7 +396,7 @@ class TaskAgent:
     # ------------------------------------------------------------------
 
     async def run(
-        self, user_message: str, today: str | None = None
+        self, user_message: str, today: str | None = None, dry_run: bool = False
     ) -> tuple[str, list[ActionTrace]]:
         """Execute the agentic loop for one user message.
 
@@ -423,6 +438,18 @@ class TaskAgent:
 
             # Execute each tool, record the trace, append the tool result
             for tc in llm_msg.tool_calls:
+                # dry_run: intercept create_task — extract data without persisting
+                if dry_run and tc.name == "create_task":
+                    self.pending_task = tc.args
+                    title = tc.args.get("title", "task")
+                    due = tc.args.get("due_date")
+                    due_str = f" due {due[:10]}" if due else ""
+                    return (
+                        f'Ready to create "{title}"{due_str}. '
+                        "Click the button below to add it to your list.",
+                        actions,
+                    )
+
                 result = call_tool(self._session, self._user_id, tc.name, tc.args)
                 actions.append(ActionTrace(tool=tc.name, args=tc.args, result=result))
                 messages.append(

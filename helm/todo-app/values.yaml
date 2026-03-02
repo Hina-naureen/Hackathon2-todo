@@ -1,0 +1,82 @@
+# helm/todo-app/values.yaml
+# References: specs/architecture.md §Phase IV Layer Diagram
+#             specs/overview.md §Repository Structure
+#
+# THIS FILE IS COMMITTED TO GIT.
+# It must contain ZERO secrets, credentials, or environment-specific values.
+#
+# All sensitive values live in the Secret template (templates/secrets.yaml)
+# and are injected at install time via --set or a gitignored override file.
+#
+# Override at install time:
+#   helm install todo-app ./helm/todo-app \
+#     --set secrets.databaseUrl="postgresql+psycopg2://..." \
+#     --set secrets.betterAuthSecret="$(openssl rand -hex 32)" \
+#     --set secrets.openaiApiKey="sk-..."                   # optional
+#
+# Or with a gitignored file:
+#   helm install todo-app ./helm/todo-app -f helm/secrets.override.yaml
+
+# ── Secrets (NEVER set default values here) ───────────────────────────────────
+# All three keys are injected at install time. The secrets.yaml template uses
+# the `required` Helm function to abort installation if mandatory keys are empty.
+secrets:
+  databaseUrl: ""        # REQUIRED — PostgreSQL connection string (Neon or other)
+  betterAuthSecret: ""   # REQUIRED — 32+ byte random hex, shared with frontend
+  openaiApiKey: ""       # OPTIONAL — agent falls back to local simulation if absent
+
+# ── Backend (FastAPI) ──────────────────────────────────────────────────────────
+backend:
+  replicaCount: 1
+  image:
+    repository: todo-backend
+    tag: latest
+    pullPolicy: Never           # Minikube local image — no registry pull
+  port: 8000
+  service:
+    type: ClusterIP
+    port: 8000
+  env:
+    # AUTH_DISABLED must be false in all deployed environments.
+    # Only set to "true" for local development without a running frontend.
+    authDisabled: "false"
+    # ALLOWED_ORIGINS: comma-separated. Set to match your Ingress hostname.
+    allowedOrigins: "http://todo.local"
+
+# ── Frontend (Next.js) ────────────────────────────────────────────────────────
+frontend:
+  replicaCount: 1
+  image:
+    repository: todo-frontend
+    tag: latest
+    pullPolicy: Never           # Minikube local image — no registry pull
+  port: 3000
+  service:
+    type: ClusterIP
+    port: 3000
+  env:
+    nodeEnv: "production"
+    # NEXT_PUBLIC_API_URL is baked in at image build time (ARG in frontend/Dockerfile).
+    # It must point to the public-facing URL of the backend API.
+    # For Ingress-based routing on Minikube: same host, /api prefix.
+    nextPublicApiUrl: "http://todo.local"
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+# nginx Ingress controller required.
+# Minikube: minikube addons enable ingress
+#
+# Path routing strategy:
+#   /api/*  → backend  (FastAPI handles all /api/* routes)
+#   /*      → frontend (Next.js catches everything else)
+#
+# The Ingress controller rewrites /api/... to /api/... on the backend pod.
+# No prefix stripping is needed because FastAPI already registers routes
+# under /api/tasks and /api/chat.
+ingress:
+  enabled: true
+  className: "nginx"
+  host: "todo.local"          # Add to /etc/hosts: <minikube-ip>  todo.local
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"

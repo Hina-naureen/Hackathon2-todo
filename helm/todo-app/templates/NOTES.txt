@@ -1,0 +1,95 @@
+todo-app {{ .Chart.Version }} deployed as release "{{ .Release.Name }}"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ACCESS THE APP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{- if .Values.ingress.enabled }}
+Ingress is ENABLED. The app is reachable at:
+
+  http://{{ .Values.ingress.host }}         ← Frontend (Next.js)
+  http://{{ .Values.ingress.host }}/docs    ← Swagger API docs
+  http://{{ .Values.ingress.host }}/health  ← Backend health check
+
+Step 1 — Get the Minikube IP:
+  minikube ip
+
+Step 2 — Add to /etc/hosts (Linux/macOS) or C:\Windows\System32\drivers\etc\hosts (Windows):
+  <minikube-ip>  {{ .Values.ingress.host }}
+
+Step 3 — Open your browser:
+  http://{{ .Values.ingress.host }}
+{{- else }}
+Ingress is DISABLED (ingress.enabled=false). Use port-forward to access services:
+
+  # Backend (FastAPI) — terminal 1
+  kubectl port-forward svc/{{ .Release.Name }}-backend-service 8000:8000
+
+  # Frontend (Next.js) — terminal 2
+  kubectl port-forward svc/{{ .Release.Name }}-frontend-service 3000:3000
+
+  Then open: http://localhost:3000
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  VERIFY DEPLOYMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # Watch pods reach Running state
+  kubectl get pods -w
+
+  # Check Ingress assigned address
+  kubectl get ingress {{ .Release.Name }}-ingress
+
+  # Confirm secrets were created (values are redacted)
+  kubectl describe secret {{ .Release.Name }}-secrets
+
+  # Backend health
+  curl http://{{ .Values.ingress.host }}/health
+  curl http://{{ .Values.ingress.host }}/health/db
+
+  # Backend logs
+  kubectl logs -l app={{ .Release.Name }}-backend -f
+
+  # Frontend logs
+  kubectl logs -l app={{ .Release.Name }}-frontend -f
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  UPGRADE / UNINSTALL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # Rebuild images and upgrade
+  helm upgrade {{ .Release.Name }} ./helm/todo-app \
+    --set secrets.databaseUrl="$DATABASE_URL" \
+    --set secrets.betterAuthSecret="$BETTER_AUTH_SECRET" \
+    --set secrets.openaiApiKey="$OPENAI_API_KEY"
+
+  # Uninstall (removes all resources including the Secret)
+  helm uninstall {{ .Release.Name }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  MINIKUBE QUICK-START (first time)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # 1. Enable nginx Ingress addon
+  minikube addons enable ingress
+
+  # 2. Point Docker daemon to Minikube's Docker
+  & minikube -p minikube docker-env --shell powershell | Invoke-Expression   # PowerShell
+  eval $(minikube docker-env)                                                  # bash/zsh
+
+  # 3. Build images inside Minikube's Docker daemon
+  docker build -t todo-backend:latest ./backend
+  docker build -t todo-frontend:latest ./frontend
+
+  # 4. Install with secrets
+  helm install {{ .Release.Name }} ./helm/todo-app \
+    --set secrets.databaseUrl="postgresql+psycopg2://..." \
+    --set secrets.betterAuthSecret="$(python -c 'import secrets; print(secrets.token_hex(32))')" \
+    --set secrets.openaiApiKey="sk-..."
+
+  # 5. Add /etc/hosts entry
+  echo "$(minikube ip)  {{ .Values.ingress.host }}" | sudo tee -a /etc/hosts
+
+  # 6. Open browser
+  open http://{{ .Values.ingress.host }}
