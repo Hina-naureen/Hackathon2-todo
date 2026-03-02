@@ -67,6 +67,8 @@ async def create_task(
         )
 
     task = _manager(session, user_id).add_task(title, body.description)
+    if body.due_date is not None:
+        task.due_date = body.due_date  # type: ignore[assignment]
     session.commit()
     session.refresh(task)
     return task  # type: ignore[return-value]
@@ -128,6 +130,8 @@ async def update_task(
     if task is None:
         raise HTTPException(status_code=404, detail=f"Task #{task_id} not found.")
 
+    if body.due_date is not None:
+        task.due_date = body.due_date  # type: ignore[assignment]
     task.updated_at = _utcnow()  # type: ignore[assignment]
     session.commit()
     session.refresh(task)

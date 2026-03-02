@@ -29,6 +29,9 @@ out/
 *.db-shm
 *.db-wal
 
+# Frontend user data (file-based auth store — never commit)
+frontend/.data/
+
 # OS
 .DS_Store
 Thumbs.db

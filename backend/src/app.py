@@ -13,7 +13,9 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.database import create_db_and_tables
+from sqlmodel import Session, text
+
+from src.database import create_db_and_tables, engine, get_session
 from src.routes.chat import router as chat_router
 from src.routes.tasks import router as tasks_router
 
@@ -70,3 +72,22 @@ app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 @app.get("/health", tags=["health"])
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/health/db", tags=["health"])
+async def health_db() -> dict[str, str]:
+    """Verify the database connection is reachable.
+
+    Executes a minimal round-trip query (SELECT 1) and returns the database
+    dialect so callers can confirm SQLite vs PostgreSQL without inspecting
+    environment variables.
+    """
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    try:
+        with Session(engine) as session:
+            session.exec(text("SELECT 1"))
+        dialect = engine.dialect.name          # "sqlite" or "postgresql"
+        return {"status": "ok", "dialect": dialect}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Database unreachable: {exc}") from exc

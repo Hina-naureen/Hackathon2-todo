@@ -1,0 +1,50 @@
+# docker-compose.yml — Phase IV: Local container orchestration
+# References: specs/overview.md §Repository Structure
+#
+# Usage:
+#   docker compose up --build        # build + start all services
+#   docker compose up -d             # detached mode
+#   docker compose down              # stop and remove containers
+
+services:
+
+  # ── FastAPI backend ──────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: todo-backend:latest
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # Allow the Next.js frontend container to reach the backend
+      ALLOWED_ORIGINS: "http://localhost:3000,http://frontend:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Next.js frontend ─────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Backend is reached at localhost:8000 from the browser
+        NEXT_PUBLIC_API_URL: "http://localhost:8000"
+        NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+    image: todo-frontend:latest
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./frontend/.env.local
+    environment:
+      NODE_ENV: production
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

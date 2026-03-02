@@ -1,6 +1,7 @@
-# src/db_models.py — Phase II SQLModel schemas
+# src/db_models.py — Phase II + III SQLModel schemas
 # References: specs/database/schema.md
 #             specs/api/rest-endpoints.md §Shared Schemas
+#             specs/api/mcp-tools.md §create_task, update_task (due_date)
 
 from __future__ import annotations
 
@@ -34,6 +35,9 @@ class Task(SQLModel, table=True):
     user_id: str = Field(index=True)
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+    # Phase III — optional due date; NULL = no due date set.
+    # Stored as naive UTC; agent converts natural-language dates to ISO 8601.
+    due_date: Optional[datetime] = Field(default=None, nullable=True)
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +50,7 @@ class TaskCreate(SQLModel):
 
     title: str
     description: str = ""
+    due_date: Optional[datetime] = None
 
 
 class TaskUpdate(SQLModel):
@@ -54,10 +59,12 @@ class TaskUpdate(SQLModel):
     null (None) means 'keep the existing value'.
     An empty string for title is a validation error (caught in the route handler).
     An empty string for description clears the description.
+    An empty string for due_date clears the due date.
     """
 
     title: Optional[str] = None
     description: Optional[str] = None
+    due_date: Optional[datetime] = None
 
 
 # ---------------------------------------------------------------------------
@@ -74,3 +81,4 @@ class TaskRead(SQLModel):
     completed: bool
     created_at: datetime
     updated_at: datetime
+    due_date: Optional[datetime] = None

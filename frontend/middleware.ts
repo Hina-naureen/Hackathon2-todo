@@ -1,4 +1,4 @@
-// proxy.ts — route protection (Next.js 16 proxy convention)
+// middleware.ts — route protection (Next.js App Router middleware convention)
 // Runs at the edge; uses `jose` (edge-compatible) to verify the auth cookie.
 //
 // Routing rules:
@@ -25,7 +25,7 @@ async function isAuthenticated(request: NextRequest): Promise<boolean> {
   }
 }
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const authed = await isAuthenticated(request)
 

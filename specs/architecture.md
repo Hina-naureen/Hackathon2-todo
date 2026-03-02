@@ -441,3 +441,202 @@ Not to be introduced in this phase under any circumstances:
 | Service layer | `src/task_service.py` |
 | CLI layer | `src/cli.py` |
 | Project config | `pyproject.toml` |
+
+---
+
+---
+
+# Architecture Specification — Phase II: Full-Stack Web API
+
+**Added:** 2026-02-28
+**Status:** Implemented
+**Spec:** `specs/features/task-crud.md`, `specs/features/authentication.md`, `specs/api/rest-endpoints.md`
+
+---
+
+## Summary
+
+Phase II extracts the Phase I service layer into a FastAPI web backend and adds a Next.js frontend. The `TaskManager` class is unchanged. The only change at the data layer is swapping `TaskStore` for `DBTaskStore`, which implements the same interface against a SQLModel/Neon PostgreSQL session. JWT-based authentication enforces per-user task isolation at every endpoint.
+
+---
+
+## Phase II Layer Diagram
+
+```
+Browser (Next.js :3000)
+        │
+        │  HTTPS — fetch() with Authorization: Bearer <JWT>
+        ▼
+┌──────────────────────────────────────────────────────┐
+│  Next.js App Router (frontend/)                      │
+│                                                      │
+│  middleware.ts  ←── JWT edge guard (jose)            │
+│  app/(auth)/    ←── sign-in / sign-up pages          │
+│  app/tasks/     ←── task list page                   │
+│  components/    ←── TaskList, ChatPanel, Header      │
+│  lib/api.ts     ←── typed fetch wrapper              │
+│  lib/user-store ←── scrypt user store (file-based)   │
+└──────────────────────────────────────────────────────┘
+        │
+        │  REST — Authorization: Bearer <JWT>
+        ▼
+┌──────────────────────────────────────────────────────┐
+│  FastAPI (backend/src/app.py :8000)                  │
+│                                                      │
+│  src/auth/dependencies.py  ←── get_current_user()   │
+│  src/routes/tasks.py       ←── CRUD endpoints        │
+│  src/routes/auth.py        ←── register / login      │
+│  src/routes/chat.py        ←── AI chat endpoint      │
+│                                                      │
+│  src/task_manager.py   ←── Phase I service (UNCHANGED)│
+│  src/database.py       ←── DBTaskStore + engine      │
+│  src/db_models.py      ←── SQLModel Task table       │
+│                                                      │
+│  Alembic migrations    ←── alembic/versions/         │
+└──────────────────────────────────────────────────────┘
+        │
+        │  SQLAlchemy — NullPool (Neon pooler)
+        ▼
+┌──────────────────────────────────────────────────────┐
+│  Neon PostgreSQL (eu-central-1)                      │
+│  task table — 7 columns + ix_task_user_id index      │
+└──────────────────────────────────────────────────────┘
+```
+
+## Key Phase II Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| `TaskManager` unchanged | Phase I–II contract: service layer is transport-agnostic |
+| `DBTaskStore` adapter | Implements same `TaskStore` interface; injected via constructor |
+| `NullPool` for Neon pooler | PgBouncer + SQLAlchemy QueuePool = double-pooling; NullPool delegates to PgBouncer |
+| JWT shared secret | Stateless auth; `BETTER_AUTH_SECRET` shared between FastAPI (PyJWT) and Next.js edge (jose) |
+| File-based user store | Simplest viable auth for hackathon; not production-grade |
+| Alembic migrations | Version-controlled schema; `upgrade head` runs on container startup |
+
+## Phase II Layer Import Rules
+
+```
+Next.js                      FastAPI
+──────                       ───────
+middleware.ts                app.py → routes/* → task_manager.py → DBTaskStore → Session
+lib/api.ts (fetch only)                       ↑
+                             auth/dependencies.py (JWT → user_id)
+```
+
+No component imports directly from the backend. All data access is through `lib/api.ts` fetch calls.
+
+---
+
+---
+
+# Architecture Specification — Phase III: AI Agent Layer
+
+**Added:** 2026-03-01
+**Status:** Implemented
+**Spec:** `specs/features/chatbot.md`, `specs/api/mcp-tools.md`, `specs/agents/agent-behavior.md`
+
+---
+
+## Summary
+
+Phase III adds an agentic AI layer on top of the Phase II REST API. The agent receives natural language from the user, decides which tool(s) to invoke, executes them, and returns a natural-language reply. Tools call `TaskManager` in-process (not via HTTP) using the same validated `user_id` and `Session` that the REST routes use.
+
+---
+
+## Phase III Layer Diagram
+
+```
+Browser
+  │
+  │  POST /api/chat  { "message": "add a task to buy milk" }
+  │  Authorization: Bearer <JWT>
+  ▼
+┌────────────────────────────────────────────────────────────┐
+│  ChatPanel.tsx (frontend/components/)                      │
+│  · Sends JWT + message to POST /api/chat                   │
+│  · Calls onMutation() when mutation tools ran              │
+│  · Falls back to local simulateAI() on network error       │
+└────────────────────────────────────────────────────────────┘
+  │
+  │  POST /api/chat (FastAPI route)
+  ▼
+┌────────────────────────────────────────────────────────────┐
+│  src/routes/chat.py                                        │
+│  · Validates JWT → user_id                                 │
+│  · Validates message (400 if empty)                        │
+│  · Instantiates TaskAgent(session, user_id)                │
+└────────────────────────────────────────────────────────────┘
+  │
+  │  agent.run(message) → (reply, actions)
+  ▼
+┌────────────────────────────────────────────────────────────┐
+│  agents/agent.py — TaskAgent (agentic loop, max 5 iters)  │
+│                                                            │
+│  _call_llm(messages)                                       │
+│    · OPENAI_API_KEY set   → OpenAI gpt-4o-mini             │
+│    · key not set          → _local_simulate() (keyword)    │
+│                                                            │
+│  stop_reason="tool_calls" → call_tool() for each          │
+│  stop_reason="stop"       → return reply                   │
+└────────────────────────────────────────────────────────────┘
+  │
+  │  call_tool(session, user_id, tool_name, args)
+  ▼
+┌────────────────────────────────────────────────────────────┐
+│  agents/tools.py — 5 tool functions                        │
+│                                                            │
+│  create_task  · list_tasks  · update_task                  │
+│  delete_task  · toggle_complete                            │
+│                                                            │
+│  All scoped to user_id — no cross-user access possible     │
+└────────────────────────────────────────────────────────────┘
+  │
+  │  TaskManager(DBTaskStore(session, user_id))
+  ▼
+┌────────────────────────────────────────────────────────────┐
+│  src/task_manager.py (Phase I — UNCHANGED)                 │
+│  + src/database.py — DBTaskStore + Neon PostgreSQL         │
+└────────────────────────────────────────────────────────────┘
+```
+
+## Key Phase III Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Tools call `TaskManager` in-process | Avoids internal HTTP round-trip; identical business logic and auth as REST routes |
+| `user_id` always injected, never from LLM output | Prevents prompt injection from escalating privileges |
+| `_local_simulate()` fallback | Demo remains live without an OpenAI key |
+| `_MAX_ITERATIONS = 5` | Prevents runaway tool-call loops; cost and latency guardrail |
+| Tool errors returned as `{"error": "..."}` dicts | Agent communicates errors in natural language; no HTTP 5xx for expected conditions |
+| Frontend calls `onMutation()` on mutation tools | Task list auto-refreshes after AI creates/updates/deletes a task |
+
+## Phase III Data Flow (end-to-end)
+
+```
+User types: "delete task 3"
+    │
+    ▼ ChatPanel.tsx → POST /api/chat { message: "delete task 3" }
+    │                 Authorization: Bearer eyJ...
+    ▼ chat.py validates JWT → user_id = "abc123"
+    ▼ TaskAgent.run("delete task 3")
+    ▼ _call_llm → OpenAI → stop_reason="tool_calls" → delete_task(id=3)
+    ▼ call_tool → delete_task(session, "abc123", id=3)
+    ▼ TaskManager.delete_task(3) → DBTaskStore.delete(3) → DELETE FROM task
+    ▼ Tool returns {"deleted": true, "id": 3, "title": "Buy milk"}
+    ▼ _call_llm → OpenAI → stop_reason="stop"
+    ▼ reply = "Done! I've deleted task #3 'Buy milk'."
+    ▼ ChatResponse { reply, trace_id, actions: [{tool: "delete_task", ...}] }
+    ▼ ChatPanel sees mutation tool in actions → calls onMutation()
+    ▼ Task list refreshes. "Buy milk" is gone.
+```
+
+## Phase III Files
+
+| File | Role |
+|------|------|
+| `backend/agents/agent.py` | `TaskAgent` — agentic loop, `LLMMessage`, `ActionTrace` |
+| `backend/agents/tools.py` | 5 tool functions, `TOOL_REGISTRY`, `TOOL_SCHEMAS`, `call_tool` |
+| `backend/agents/prompts.py` | `SYSTEM_PROMPT` — agent personality and tool-use rules |
+| `backend/src/routes/chat.py` | `POST /api/chat` — validates, runs agent, returns `ChatResponse` |
+| `frontend/components/ChatPanel.tsx` | Chat UI — sends JWT + message, handles reply + mutations |

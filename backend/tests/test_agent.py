@@ -530,46 +530,61 @@ class TestLocalSimulation:
 
     def test_add_keyword_returns_task_creation_reply(self, session: Session):
         # References: specs/agents/agent-behavior.md §LLM Interface (_call_llm)
+        # _local_simulate now returns tool_calls so the agentic loop executes
+        # the real create_task tool and persists to the database.
         agent = TaskAgent(session, TEST_USER)
         result = agent._local_simulate(self._msgs("I want to add a task"))
-        assert result.content == "Sure, I can help add that task."
-        assert result.stop_reason == "stop"
-        assert result.tool_calls == []
+        assert result.stop_reason == "tool_calls"
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "create_task"
 
-    def test_delete_keyword_returns_removal_reply(self, session: Session):
+    def test_delete_keyword_without_id_asks_for_clarification(self, session: Session):
+        # No task number in message → clarification prompt (stop, no tool call).
         agent = TaskAgent(session, TEST_USER)
         result = agent._local_simulate(self._msgs("please delete that task"))
-        assert result.content == "Okay, removing that task."
         assert result.stop_reason == "stop"
+        assert result.content is not None
+        assert "task number" in result.content.lower() or "which" in result.content.lower()
 
-    def test_list_keyword_returns_listing_reply(self, session: Session):
+    def test_delete_keyword_with_id_returns_tool_call(self, session: Session):
+        # Task number present → delete_task tool call.
+        agent = TaskAgent(session, TEST_USER)
+        result = agent._local_simulate(self._msgs("delete task 3"))
+        assert result.stop_reason == "tool_calls"
+        assert result.tool_calls[0].name == "delete_task"
+        assert result.tool_calls[0].args["id"] == 3
+
+    def test_list_keyword_returns_list_tasks_tool_call(self, session: Session):
+        # _local_simulate now returns tool_calls so list_tasks executes against DB.
         agent = TaskAgent(session, TEST_USER)
         result = agent._local_simulate(self._msgs("list my tasks"))
-        assert result.content == "Here are your current tasks."
-        assert result.stop_reason == "stop"
+        assert result.stop_reason == "tool_calls"
+        assert result.tool_calls[0].name == "list_tasks"
 
     def test_hello_keyword_returns_greeting(self, session: Session):
         agent = TaskAgent(session, TEST_USER)
         result = agent._local_simulate(self._msgs("hello there"))
-        assert result.content == "Hello! How can I help you manage your tasks today?"
         assert result.stop_reason == "stop"
+        assert result.content is not None
+        assert "hello" in result.content.lower()
 
     def test_hi_keyword_returns_greeting(self, session: Session):
         agent = TaskAgent(session, TEST_USER)
         result = agent._local_simulate(self._msgs("hi!"))
-        assert result.content == "Hello! How can I help you manage your tasks today?"
         assert result.stop_reason == "stop"
+        assert result.content  # non-empty reply
 
-    def test_unknown_message_returns_preview_mode_notice(self, session: Session):
+    def test_unknown_message_returns_fallback_help(self, session: Session):
         agent = TaskAgent(session, TEST_USER)
-        result = agent._local_simulate(self._msgs("what is the weather today?"))
-        assert result.content == "I'm in preview mode. AI backend will be connected in Phase III."
+        result = agent._local_simulate(self._msgs("what is the weather outside?"))
         assert result.stop_reason == "stop"
+        assert result.content  # fallback help text is non-empty
 
     def test_matching_is_case_insensitive(self, session: Session):
         agent = TaskAgent(session, TEST_USER)
         result = agent._local_simulate(self._msgs("ADD a new item"))
-        assert result.content == "Sure, I can help add that task."
+        assert result.stop_reason == "tool_calls"
+        assert result.tool_calls[0].name == "create_task"
 
     def test_call_llm_uses_simulation_when_no_api_key(
         self, session: Session, monkeypatch: pytest.MonkeyPatch
@@ -582,8 +597,9 @@ class TestLocalSimulation:
             {"role": "user", "content": "list tasks"},
         ]
         result = _run(agent._call_llm(messages))
-        assert result.content == "Here are your current tasks."
-        assert result.stop_reason == "stop"
+        # list intent → tool_calls (real list_tasks executes against DB)
+        assert result.stop_reason == "tool_calls"
+        assert result.tool_calls[0].name == "list_tasks"
 
     def test_call_llm_simulation_does_not_raise_503(
         self, session: Session, monkeypatch: pytest.MonkeyPatch

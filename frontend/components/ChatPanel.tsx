@@ -12,6 +12,7 @@ interface Message {
   content: string
   showAction?: boolean   // true when the "add" keyword was detected — renders Create Task button
   taskTitle?: string     // extracted task subject — sent as prefillTitle to the modal
+  priority?: 'high' | 'medium' | 'normal'  // detected from urgency/time keywords
 }
 
 interface ChatPanelProps {
@@ -19,7 +20,7 @@ interface ChatPanelProps {
   onClose: () => void
   onMutation?: () => void
   pendingTaskCount: number
-  onAITaskCreate: (title: string) => void
+  onAITaskCreate: (title: string, priority: 'high' | 'medium' | 'normal') => void
 }
 
 // ---------------------------------------------------------------------------
@@ -112,8 +113,24 @@ function simulateAI(message: string): string {
   return `Tell me more about your task so I can help.`
 }
 
-// Delay (ms) that keeps the "AI is typing…" indicator visible before the reply appears
+/**
+ * detectPriority — maps time/urgency keywords to a priority level.
+ *   "urgent" | "today"    → high
+ *   "tomorrow" | "homework" → medium
+ *   everything else         → normal
+ */
+function detectPriority(text: string): 'high' | 'medium' | 'normal' {
+  const t = text.toLowerCase()
+  if (t.includes('today') || t.includes('urgent')) return 'high'
+  if (t.includes('tomorrow') || t.includes('homework')) return 'medium'
+  return 'normal'
+}
+
+// Delay (ms) used only when falling back to local simulation
 const AI_THINKING_DELAY = 700
+
+// Tools that mutate the task list — trigger a refresh when any of these run
+const MUTATION_TOOLS = new Set(['create_task', 'update_task', 'delete_task', 'toggle_complete'])
 
 // ---------------------------------------------------------------------------
 // AI avatar — gradient circle with star icon
@@ -136,7 +153,7 @@ function AiAvatar() {
 // ChatPanel
 // ---------------------------------------------------------------------------
 
-export default function ChatPanel({ onClose, pendingTaskCount, onAITaskCreate }: ChatPanelProps) {
+export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount, onAITaskCreate }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -163,22 +180,55 @@ export default function ChatPanel({ onClose, pendingTaskCount, onAITaskCreate }:
     // Append user bubble immediately
     setMessages(prev => [...prev, { id: Date.now(), role: 'user', content: text }])
     setInput('')
-
-    // Show typing indicator, simulate AI thinking, then reply locally
     setLoading(true)
-    await new Promise(resolve => setTimeout(resolve, AI_THINKING_DELAY))
-    setLoading(false)
 
-    setMessages(prev => [
-      ...prev,
-      {
-        id: Date.now(),
-        role: 'assistant',
-        content: simulateAI(text),
-        showAction: text.toLowerCase().includes('add'),
-        taskTitle: extractTask(text),
-      },
-    ])
+    try {
+      // --- Real backend call via POST /api/chat ---
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+      const res = await fetch(`${apiUrl}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          message: text,
+          // Provide today's date so the agent can resolve relative phrases
+          // like "tomorrow" or "next Friday" without ambiguity.
+          today: new Date().toISOString().split('T')[0],
+        }),
+      })
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+      const data = await res.json() as { reply: string; actions: { tool: string }[] }
+
+      // Refresh task list when the agent mutated any tasks
+      if (data.actions.some(a => MUTATION_TOOLS.has(a.tool))) {
+        onMutation?.()
+      }
+
+      setMessages(prev => [
+        ...prev,
+        { id: Date.now(), role: 'assistant', content: data.reply },
+      ])
+    } catch {
+      // --- Fallback: local keyword simulation (no network / no key) ---
+      await new Promise(resolve => setTimeout(resolve, AI_THINKING_DELAY))
+      setMessages(prev => [
+        ...prev,
+        {
+          id: Date.now(),
+          role: 'assistant',
+          content: simulateAI(text),
+          showAction: text.toLowerCase().includes('add'),
+          taskTitle: extractTask(text),
+          priority: detectPriority(text),
+        },
+      ])
+    } finally {
+      setLoading(false)
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -205,7 +255,7 @@ export default function ChatPanel({ onClose, pendingTaskCount, onAITaskCreate }:
           <div>
             <p className="text-xs font-bold text-white leading-none">AI Assistant</p>
             <p className="text-[10px] font-medium text-white/70 leading-none mt-0.5 uppercase tracking-widest">
-              Phase III Preview
+              Phase III · Live
             </p>
           </div>
         </div>
@@ -261,7 +311,7 @@ export default function ChatPanel({ onClose, pendingTaskCount, onAITaskCreate }:
             {msg.role === 'assistant' && msg.showAction && (
               <div className="msg-in flex justify-start pl-8">
                 <button
-                  onClick={() => onAITaskCreate(msg.taskTitle ?? '')}
+                  onClick={() => onAITaskCreate(msg.taskTitle ?? '', msg.priority ?? 'normal')}
                   className="px-3 py-1.5 text-xs font-medium rounded-xl bg-slate-900 text-white hover:scale-105 active:scale-95 transition-all duration-200 dark:bg-white dark:text-slate-900"
                 >
                   + Create Task

@@ -1,9 +1,9 @@
 # Agent Behavior Specification: TaskAgent — Phase III
 
-**Version:** 1.0.0
-**Date:** 2026-02-25
-**Status:** Draft
-**Stage:** spec
+**Version:** 1.1.0
+**Date:** 2026-03-02
+**Status:** Implemented
+**Stage:** green
 **Phase:** III
 **References:**
 - `specs/features/chatbot.md` — feature requirements
@@ -69,8 +69,8 @@ the agent logic is fully deterministic and testable in isolation.
 **Production behavior:**
 - Uses `openai.AsyncOpenAI` with model `gpt-4o-mini`.
 - Passes `TOOL_SCHEMAS` and `tool_choice="auto"`.
-- Raises `HTTP 503` if `OPENAI_API_KEY` is not set.
-- Raises `HTTP 503` if the `openai` package is not installed.
+- Falls back to `_local_simulate()` if `OPENAI_API_KEY` is not set (no 503 — app stays live).
+- Raises `HTTP 503` only if the `openai` package is not installed at all.
 
 **Test behavior:**
 - Monkeypatched via `monkeypatch.setattr(agent_instance, "_call_llm", fake_fn)`.
@@ -162,7 +162,7 @@ POST /api/chat
 
 | Scenario | Outcome |
 |----------|---------|
-| `OPENAI_API_KEY` not set | `HTTP 503 {"detail": "AI service not configured. Set OPENAI_API_KEY."}` |
+| `OPENAI_API_KEY` not set | Falls back to `_local_simulate()` — HTTP 200 with canned keyword reply; no 503 |
 | `openai` package not installed | `HTTP 503 {"detail": "openai package not installed."}` |
 | Tool returns `{"error": ...}` | Agent sees the error in its tool result, communicates it in the reply; HTTP 200 |
 | Max iterations reached | HTTP 200 with fallback reply; `actions` contains all tools called so far |

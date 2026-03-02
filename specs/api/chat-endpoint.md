@@ -1,9 +1,9 @@
 # API Specification: Chat Endpoint — Phase III
 
-**Version:** 1.0.0
-**Date:** 2026-02-25
-**Status:** Draft
-**Stage:** spec
+**Version:** 1.1.0
+**Date:** 2026-03-02
+**Status:** Implemented
+**Stage:** green
 **Phase:** III
 **Base URL:** `http://localhost:8000` (development)
 **Overview:** `specs/overview.md`
@@ -60,15 +60,31 @@ Send a user message and receive an AI-generated (or stub) reply.
 
 ```json
 {
-  "reply": "You said: What tasks do I have today?",
-  "trace_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+  "reply": "You have 2 pending tasks: Buy milk, Submit report.",
+  "trace_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "actions": [
+    {
+      "tool": "list_tasks",
+      "args": { "filter": "pending" },
+      "result": { "tasks": [...], "count": 2 }
+    }
+  ]
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `reply` | string | The assistant's response. In Phase III stub: `"You said: <message>"`. |
-| `trace_id` | string | UUID v4 generated per request. Enables log correlation when real AI calls are added. |
+| `reply` | string | The assistant's natural-language response (from OpenAI or local simulation). |
+| `trace_id` | string | UUID v4 generated per request. Used for log correlation. |
+| `actions` | array | Every tool invoked during this request. Empty (`[]`) when no tools were called. |
+
+**`actions` item schema:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tool` | string | Tool name, e.g. `"create_task"`, `"list_tasks"` |
+| `args` | object | Arguments passed to the tool (user_id excluded) |
+| `result` | any | Tool return value — task object, list, or `{"error": "..."}` |
 
 **Error responses:**
 
@@ -82,13 +98,16 @@ Send a user message and receive an AI-generated (or stub) reply.
 
 **Acceptance Criteria:**
 
-1. Authenticated request with a non-empty `message` returns `200` with `reply` and `trace_id`.
-2. `reply` in Phase III stub is exactly `"You said: <stripped message>"`.
+1. Authenticated request with a non-empty `message` returns `200` with `reply`, `trace_id`, and `actions`.
+2. `reply` is a non-empty string produced by the TaskAgent (OpenAI or local simulation fallback).
 3. `trace_id` is a valid UUID v4 string, unique per request.
 4. Empty or whitespace-only `message` returns `400`.
 5. Request without `Authorization` header returns `401 {"detail": "Not authenticated."}`.
 6. Request with an invalid JWT returns `401 {"detail": "Invalid token."}`.
-7. `user_id` from the JWT `sub` claim is available to the handler (for future personalisation) but is **never** included in the response.
+7. `user_id` from the JWT `sub` claim is available to the handler but is **never** included in the response.
+8. `actions` is a list; it is empty when the agent returns without calling any tools.
+9. When any mutation tool runs, the frontend calls `onMutation()` to refresh the task list.
+10. If the agent raises any exception, the route falls back to `"You said: <message>"` — HTTP 200, never 500.
 
 ---
 
@@ -106,8 +125,19 @@ Send a user message and receive an AI-generated (or stub) reply.
 
 ```
 {
-  "reply":    string  (assistant reply text)
-  "trace_id": string  (UUID v4, unique per request)
+  "reply":    string   (assistant reply text)
+  "trace_id": string   (UUID v4, unique per request)
+  "actions":  array    (list of ActionTraceOut — may be empty)
+}
+```
+
+### ActionTraceOut (element of `actions`)
+
+```
+{
+  "tool":   string   (tool name)
+  "args":   object   (tool arguments passed by the LLM)
+  "result": any      (tool return value or {"error": "..."})
 }
 ```
 
@@ -124,18 +154,19 @@ Additional entry specific to this endpoint:
 
 ---
 
-## Phase III Stub vs Production
+## Phase III — Production Behaviour
 
-| Concern | Phase III Stub | Production (future) |
-|---------|---------------|---------------------|
-| Reply source | Deterministic echo: `"You said: <message>"` | OpenAI / LLM call |
-| Latency | Instant | 500 ms – 5 s |
-| Errors | 400, 401 only | + 502 (upstream AI failure), 429 (rate limit) |
-| Context | None | Task list injected as system prompt |
-| Streaming | Not supported | Optional (Server-Sent Events) |
+| Concern | With `OPENAI_API_KEY` | Without `OPENAI_API_KEY` |
+|---------|----------------------|--------------------------|
+| Reply source | OpenAI `gpt-4o-mini` + tool calling | Local keyword simulation (`_local_simulate`) |
+| Tool calls | Real (creates/updates/deletes tasks) | None (no tool calls in simulation) |
+| Latency | p95 < 5 s | Instant |
+| Errors | 400, 401, 503 (openai pkg missing) | 400, 401 |
+| Schema | `reply`, `trace_id`, `actions` | Same — always consistent |
+| Streaming | Not supported | Not applicable |
 
-The schema (`reply`, `trace_id`) is stable across stub and production. The
-frontend does not need to change when the stub is replaced.
+The schema (`reply`, `trace_id`, `actions`) is identical regardless of whether
+the OpenAI key is set. The frontend never needs to change.
 
 ---
 

@@ -1,9 +1,9 @@
 # Feature Specification: AI Chatbot — Phase III
 
-**Version:** 1.0.0
-**Date:** 2026-02-25
-**Status:** Draft
-**Stage:** spec
+**Version:** 1.2.0
+**Date:** 2026-03-02
+**Status:** Implemented
+**Stage:** green
 **Phase:** III
 **References:**
 - `specs/api/chat-endpoint.md` — HTTP contract
@@ -79,6 +79,47 @@ already renders the `reply` and surfaces the `actions` trace.
 
 ---
 
+### US-CHAT-07 — Delete a task via chat
+
+> As an authenticated user, I want to say "Delete task 3" and have the assistant
+> permanently remove it from my list.
+
+**Acceptance Criteria:**
+1. The assistant calls `delete_task` with the correct task ID.
+2. The task is removed from the database.
+3. The reply confirms the task title and ID that was deleted.
+4. If the task ID does not exist, the reply states the task was not found.
+5. The `actions` array contains one entry with `tool: "delete_task"`.
+
+---
+
+### US-CHAT-08 — Create task with due date via natural language
+
+> As an authenticated user, I want to say "Add meeting tomorrow at 2 PM" and have
+> the assistant create a task with a parsed due date.
+
+**Acceptance Criteria:**
+1. The assistant calls `create_task` with a `due_date` field in ISO 8601 format
+   derived from the temporal phrase ("tomorrow at 2 PM").
+2. The task is saved with the `due_date` column populated.
+3. The reply confirms both the task title and the due date.
+4. If no temporal phrase is present, `due_date` is omitted (nullable — no error).
+5. The agent never fabricates a date; if the phrase is ambiguous, it clarifies.
+
+---
+
+### US-CHAT-09 — Update task due date via chat
+
+> As an authenticated user, I want to say "Move task 3 to Friday" and have the
+> assistant update only the due date of that task.
+
+**Acceptance Criteria:**
+1. The assistant calls `update_task` with `id` and `due_date` only.
+2. `title` and `description` remain unchanged.
+3. The reply confirms the new due date.
+
+---
+
 ### US-CHAT-05 — Off-topic redirect
 
 > As a user, if I ask "What's the weather today?" the assistant politely
@@ -106,14 +147,18 @@ already renders the `reply` and surfaces the `actions` trace.
 
 | ID | Requirement |
 |----|-------------|
-| FR-CHAT-001 | Agent only reads/writes task data via the four defined tools. |
+| FR-CHAT-001 | Agent only reads/writes task data via the five defined tools. |
 | FR-CHAT-002 | `user_id` from the JWT `sub` claim is threaded through every tool call. |
-| FR-CHAT-003 | A valid `OPENAI_API_KEY` must be set; without it the route returns `503`. |
+| FR-CHAT-003 | Without `OPENAI_API_KEY`, the agent degrades to local keyword simulation — it does not return 503. |
 | FR-CHAT-004 | The agent loop has a maximum iteration cap of 5 to prevent runaway calls. |
 | FR-CHAT-005 | The response includes an `actions` array listing every tool invoked. |
 | FR-CHAT-006 | Empty or whitespace-only messages return `400`. |
-| FR-CHAT-007 | Missing/invalid JWT returns `401` (unchanged from Phase III stub). |
+| FR-CHAT-007 | Missing/invalid JWT returns `401`. |
 | FR-CHAT-008 | Tool errors (e.g., task not found) are surfaced in the `actions.result` and reflected in the reply; they do not raise HTTP 5xx. |
+| FR-CHAT-009 | Frontend must pass the user's JWT as `Authorization: Bearer <token>` on every `POST /api/chat` request. |
+| FR-CHAT-010 | When any mutation tool runs (`create_task`, `update_task`, `delete_task`, `toggle_complete`), the frontend task list must refresh automatically. |
+| FR-CHAT-011 | `create_task` and `update_task` tools accept an optional `due_date` (ISO 8601 string, nullable). Agent parses temporal phrases before calling the tool. |
+| FR-CHAT-012 | The agent must never invent or hallucinate due dates; it derives them only from explicit temporal language in the user's message. |
 
 ---
 
@@ -132,7 +177,6 @@ already renders the `reply` and surfaces the `actions` trace.
 
 - Streaming responses (Server-Sent Events)
 - Multi-turn conversation memory (each request is stateless)
-- Task deletion via chat
 - File uploads or attachments
 - Rate limiting on the chat endpoint
 - OpenAI cost tracking

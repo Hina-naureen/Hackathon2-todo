@@ -31,6 +31,9 @@ class ChatRequest(BaseModel):
     """
 
     message: str
+    # Optional: YYYY-MM-DD string from the client so the agent can resolve
+    # relative date phrases ("tomorrow", "next Friday") without ambiguity.
+    today: str | None = None
 
 
 class ActionTraceOut(BaseModel):
@@ -83,7 +86,7 @@ async def chat(
     actions: list[ActionTrace] = []
     try:
         agent = TaskAgent(session, user_id)
-        reply, actions = await agent.run(message)
+        reply, actions = await agent.run(message, today=body.today)
     except Exception as exc:
         logger.error("Agent failed for user %s — falling back to echo: %s", user_id, exc)
         reply = f"You said: {message}"

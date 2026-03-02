@@ -1,9 +1,9 @@
 # API Specification: MCP-Style Agent Tools — Phase III
 
-**Version:** 1.0.0
-**Date:** 2026-02-25
-**Status:** Draft
-**Stage:** spec
+**Version:** 1.2.0
+**Date:** 2026-03-02
+**Status:** Implemented
+**Stage:** green
 **Phase:** III
 **References:**
 - `specs/features/chatbot.md` — feature context
@@ -40,15 +40,17 @@ Create a new task for the authenticated user.
 |------|------|----------|-------------|
 | `title` | string | **Yes** | 1–200 chars after strip; non-empty |
 | `description` | string | No | 0–500 chars; defaults to `""` |
+| `due_date` | string \| null | No | ISO 8601 datetime string (`"2026-03-03T14:00:00"`); `null` = no due date |
 
 **Success result:**
 
 ```json
 {
   "id": 5,
-  "title": "Buy groceries",
-  "description": "Milk and eggs",
-  "completed": false
+  "title": "Meeting",
+  "description": "",
+  "completed": false,
+  "due_date": "2026-03-03T14:00:00"
 }
 ```
 
@@ -60,6 +62,8 @@ Create a new task for the authenticated user.
 
 **Business rules:**
 - Title is stripped of leading/trailing whitespace before storage.
+- `due_date` is stored as a naive UTC datetime; the agent converts natural-language
+  temporal expressions to ISO 8601 before calling this tool.
 - Mirrors `POST /api/tasks` validation exactly.
 
 ---
@@ -104,6 +108,7 @@ Update the title and/or description of an existing task.
 | `id` | integer | **Yes** | Task ID to update |
 | `title` | string \| null | No | `null` = keep current; non-empty string = replace |
 | `description` | string \| null | No | `null` = keep current; any string (including `""`) = replace |
+| `due_date` | string \| null | No | ISO 8601 string = set new due date; `null` = keep current; `""` = clear due date |
 
 **Success result:**
 
@@ -126,6 +131,39 @@ Update the title and/or description of an existing task.
 - Mirrors `PUT /api/tasks/{id}` validation (title 1–200 chars, desc 0–500 chars).
 - `updated_at` is refreshed on every successful update.
 - Only the authenticated user's tasks can be updated.
+
+---
+
+### `delete_task`
+
+Permanently delete a task owned by the authenticated user.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `id` | integer | **Yes** | Task ID to delete |
+
+**Success result:**
+
+```json
+{
+  "deleted": true,
+  "id": 3,
+  "title": "Buy groceries"
+}
+```
+
+**Error result:**
+
+```json
+{ "error": "Task #99 not found." }
+```
+
+**Business rules:**
+- The task must belong to the authenticated user; cross-user deletes return a not-found error.
+- The operation is permanent — there is no soft-delete or undo.
+- Mirrors `DELETE /api/tasks/{id}` semantics exactly.
 
 ---
 

@@ -1,9 +1,11 @@
 # agents/tools.py — MCP-style tool functions for TaskAgent
 # References: specs/api/mcp-tools.md
 #             specs/agents/agent-behavior.md §Tool Dispatch
+#             specs/features/chatbot.md §FR-CHAT-011 (due_date)
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from sqlmodel import Session
@@ -32,13 +34,31 @@ def _manager(session: Session, user_id: str) -> TaskManager:
 # ---------------------------------------------------------------------------
 
 
+def _parse_due_date(due_date: str | None) -> datetime | None:
+    """Parse an ISO 8601 string from the LLM into a naive UTC datetime.
+
+    Returns None for None or empty string. Raises ValueError on bad format
+    so the caller can return a clean {"error": ...} dict.
+    """
+    if not due_date:
+        return None
+    # fromisoformat handles "2026-03-03T14:00:00" and "2026-03-03"
+    dt = datetime.fromisoformat(due_date)
+    # Strip timezone info — stored as naive UTC (matches created_at/updated_at)
+    return dt.replace(tzinfo=None)
+
+
 def create_task(
     session: Session,
     user_id: str,
     title: str,
     description: str = "",
+    due_date: str | None = None,
 ) -> dict[str, Any]:
-    """Create a task. Returns the created task dict or {"error": "..."}."""
+    """Create a task. Returns the created task dict or {"error": "..."}.
+
+    References: specs/api/mcp-tools.md §create_task
+    """
     title = title.strip()
     if not title:
         return {"error": "Title cannot be empty."}
@@ -47,7 +67,14 @@ def create_task(
     if len(description) > MAX_DESCRIPTION_LENGTH:
         return {"error": f"Description must be {MAX_DESCRIPTION_LENGTH} characters or fewer."}
 
+    try:
+        parsed_due = _parse_due_date(due_date)
+    except ValueError:
+        return {"error": f"Invalid due_date format '{due_date}'. Use ISO 8601 (e.g. '2026-03-03T14:00:00')."}
+
     task = _manager(session, user_id).add_task(title, description)
+    if parsed_due is not None:
+        task.due_date = parsed_due  # type: ignore[assignment]
     session.commit()
     session.refresh(task)
     return {
@@ -55,6 +82,7 @@ def create_task(
         "title": task.title,
         "description": task.description,
         "completed": task.completed,
+        "due_date": task.due_date.isoformat() if task.due_date else None,
     }
 
 
@@ -78,6 +106,7 @@ def list_tasks(
                 "title": t.title,
                 "description": t.description,
                 "completed": t.completed,
+                "due_date": t.due_date.isoformat() if t.due_date else None,  # type: ignore[union-attr]
             }
             for t in tasks
         ],
@@ -91,8 +120,12 @@ def update_task(
     id: int,
     title: str | None = None,
     description: str | None = None,
+    due_date: str | None = None,
 ) -> dict[str, Any]:
-    """Update a task's title and/or description. Returns updated task or error."""
+    """Update a task's title, description, and/or due_date. Returns updated task or error.
+
+    References: specs/api/mcp-tools.md §update_task
+    """
     if title is not None:
         title = title.strip()
         if not title:
@@ -103,10 +136,18 @@ def update_task(
     if description is not None and len(description) > MAX_DESCRIPTION_LENGTH:
         return {"error": f"Description must be {MAX_DESCRIPTION_LENGTH} characters or fewer."}
 
+    try:
+        parsed_due = _parse_due_date(due_date)
+    except ValueError:
+        return {"error": f"Invalid due_date format '{due_date}'. Use ISO 8601 (e.g. '2026-03-03T14:00:00')."}
+
     task = _manager(session, user_id).update_task(id, title, description)
     if task is None:
         return {"error": f"Task #{id} not found."}
 
+    if due_date is not None:
+        # Empty string clears the due date; non-empty sets it
+        task.due_date = parsed_due  # type: ignore[assignment]
     task.updated_at = _utcnow()  # type: ignore[assignment]
     session.commit()
     session.refresh(task)
@@ -115,7 +156,21 @@ def update_task(
         "title": task.title,
         "description": task.description,
         "completed": task.completed,
+        "due_date": task.due_date.isoformat() if task.due_date else None,
     }
+
+
+def delete_task(
+    session: Session,
+    user_id: str,
+    id: int,
+) -> dict[str, Any]:
+    """Delete a task by ID. Returns confirmation or error."""
+    deleted, title = _manager(session, user_id).delete_task(id)
+    if not deleted:
+        return {"error": f"Task #{id} not found."}
+    session.commit()
+    return {"deleted": True, "id": id, "title": title}
 
 
 def toggle_complete(
@@ -147,6 +202,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "create_task": create_task,
     "list_tasks": list_tasks,
     "update_task": update_task,
+    "delete_task": delete_task,
     "toggle_complete": toggle_complete,
 }
 
@@ -190,6 +246,15 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": "Optional task description (max 500 characters).",
                     },
+                    "due_date": {
+                        "type": "string",
+                        "description": (
+                            "Optional due date in ISO 8601 format (e.g. '2026-03-03T14:00:00'). "
+                            "Convert any natural-language date/time in the user's message "
+                            "(e.g. 'tomorrow at 2 PM', 'Friday') to ISO 8601 before calling. "
+                            "Omit if no date was mentioned."
+                        ),
+                    },
                 },
                 "required": ["title"],
             },
@@ -220,8 +285,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "update_task",
             "description": (
-                "Update the title and/or description of an existing task. "
-                "Pass null (omit) to keep the current value."
+                "Update the title, description, and/or due_date of an existing task. "
+                "Omit any field to keep its current value."
             ),
             "parameters": {
                 "type": "object",
@@ -237,6 +302,31 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "description": {
                         "type": "string",
                         "description": "New description (omit to keep existing).",
+                    },
+                    "due_date": {
+                        "type": "string",
+                        "description": (
+                            "New due date in ISO 8601 format (e.g. '2026-03-06T10:00:00'). "
+                            "Pass empty string '' to clear the due date. "
+                            "Omit to keep existing due date."
+                        ),
+                    },
+                },
+                "required": ["id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_task",
+            "description": "Permanently delete a task by ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The task ID to delete.",
                     },
                 },
                 "required": ["id"],
