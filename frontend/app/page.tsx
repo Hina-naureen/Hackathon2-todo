@@ -1,3 +1,3 @@
 export default function Home() {
-  return <h1>Hackathon Todo App Working</h1>;
+  return <h1>Todo App Running Successfully</h1>;
 }
