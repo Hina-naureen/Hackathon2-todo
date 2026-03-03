@@ -14,21 +14,21 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 
 # Copy dependency manifest + lock file first (layer-cache friendly)
-COPY pyproject.toml uv.lock ./
+COPY backend/pyproject.toml backend/uv.lock ./
 
 # Install production dependencies only
 RUN uv sync --frozen --no-dev
 
 # Copy application source
-COPY src/ src/
-COPY agents/ agents/
-COPY alembic/ alembic/
-COPY alembic.ini .
+COPY backend/ .
 
 # Create non-root user (uid 1000) and fix ownership before switching user.
 # Required for Kubernetes securityContext.runAsNonRoot: true.
 RUN useradd --system --uid 1000 --no-create-home appuser \
+    && mkdir -p /app/.cache/uv \
     && chown -R appuser /app
+
+ENV UV_CACHE_DIR=/app/.cache/uv
 
 USER appuser
 

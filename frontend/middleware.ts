@@ -1,5 +1,5 @@
 // middleware.ts — route protection (Next.js App Router middleware convention)
-// Runs at the edge; uses `jose` (edge-compatible) to verify the auth cookie.
+// Runs at the edge; checks cookie existence only (JWT verified at page level).
 //
 // Routing rules:
 //   /tasks (and sub-paths) → redirect to /sign-in if unauthenticated
@@ -8,26 +8,10 @@
 
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { jwtVerify } from 'jose'
-
-const SECRET = new TextEncoder().encode(
-  process.env.BETTER_AUTH_SECRET ?? 'dev-secret-change-in-production'
-)
-
-async function isAuthenticated(request: NextRequest): Promise<boolean> {
-  const token = request.cookies.get('auth_token')?.value
-  if (!token) return false
-  try {
-    await jwtVerify(token, SECRET)
-    return true
-  } catch {
-    return false
-  }
-}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
-  const authed = await isAuthenticated(request)
+  const authed = !!request.cookies.get('auth_token')?.value
 
   // Protected routes
   if (pathname.startsWith('/tasks')) {
