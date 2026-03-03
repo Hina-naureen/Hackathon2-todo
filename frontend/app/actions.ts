@@ -1,13 +1,14 @@
 'use server'
 
 // app/actions.ts — server actions for authentication
-// signIn / signUp write an httpOnly JWT cookie on success.
-// signOut clears it.
+// Calls FastAPI backend for sign-in / sign-up.
+// On success, stores the backend-issued JWT in an httpOnly cookie.
 
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { signToken, COOKIE_NAME } from '@/lib/auth'
-import { findUserByEmail, createUser, verifyPassword } from '@/lib/user-store'
+import { COOKIE_NAME } from '@/lib/auth'
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
@@ -24,12 +25,23 @@ export async function signIn(
   const email = (formData.get('email') as string | null) ?? ''
   const password = (formData.get('password') as string | null) ?? ''
 
-  const user = await findUserByEmail(email)
-  if (!user || !(await verifyPassword(password, user.passwordHash))) {
-    return 'Invalid email or password.'
+  let res: Response
+  try {
+    res = await fetch(`${API_URL}/api/auth/sign-in`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
+  } catch {
+    return 'Could not reach the server. Please try again.'
   }
 
-  const token = await signToken({ sub: user.id, email: user.email, name: user.name })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { detail?: string }
+    return data.detail ?? 'Invalid email or password.'
+  }
+
+  const { token } = await res.json() as { token: string }
   const cookieStore = await cookies()
   cookieStore.set(COOKIE_NAME, token, COOKIE_OPTIONS)
 
@@ -48,11 +60,23 @@ export async function signUp(
   if (!email) return 'Email is required.'
   if (password.length < 8) return 'Password must be at least 8 characters.'
 
-  const existing = await findUserByEmail(email)
-  if (existing) return 'An account with this email already exists.'
+  let res: Response
+  try {
+    res = await fetch(`${API_URL}/api/auth/sign-up`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password }),
+    })
+  } catch {
+    return 'Could not reach the server. Please try again.'
+  }
 
-  const user = await createUser({ name, email, password })
-  const token = await signToken({ sub: user.id, email: user.email, name: user.name })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { detail?: string }
+    return data.detail ?? 'Failed to create account.'
+  }
+
+  const { token } = await res.json() as { token: string }
   const cookieStore = await cookies()
   cookieStore.set(COOKIE_NAME, token, COOKIE_OPTIONS)
 

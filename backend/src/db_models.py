@@ -8,6 +8,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
+import uuid
+
 from sqlmodel import Field, SQLModel
 
 
@@ -17,7 +19,26 @@ def _utcnow() -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# Table model
+# User table
+# ---------------------------------------------------------------------------
+
+
+class AppUser(SQLModel, table=True):
+    """Registered user — stores hashed password in Neon DB."""
+
+    __tablename__ = "app_users"
+
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        primary_key=True,
+    )
+    name: str = Field(max_length=100)
+    email: str = Field(unique=True, index=True, max_length=200)
+    password_hash: str
+
+
+# ---------------------------------------------------------------------------
+# Task table
 # ---------------------------------------------------------------------------
 
 

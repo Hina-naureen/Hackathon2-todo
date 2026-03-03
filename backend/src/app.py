@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, text
 
 from src.database import create_db_and_tables, engine, get_session
+from src.routes.auth import router as auth_router
 from src.routes.chat import router as chat_router
 from src.routes.tasks import router as tasks_router
 
@@ -62,6 +63,7 @@ app.add_middleware(
 # Routers
 # ---------------------------------------------------------------------------
 
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(tasks_router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 
