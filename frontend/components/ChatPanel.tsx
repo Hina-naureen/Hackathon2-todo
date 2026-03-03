@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, Fragment } from 'react'
+import { useLanguage } from '@/lib/i18n'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,9 +17,9 @@ interface Message {
   id: number
   role: 'user' | 'assistant'
   content: string
-  pendingTask?: PendingTask   // task preview — shows "Create Task" button
-  taskCreated?: boolean       // true after the user confirms task creation
-  showAction?: boolean        // legacy fallback flag
+  pendingTask?: PendingTask
+  taskCreated?: boolean
+  showAction?: boolean
   taskTitle?: string
   priority?: 'high' | 'medium' | 'normal'
 }
@@ -35,18 +36,10 @@ interface ChatPanelProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Returns true when the message looks like a task-creation request.
- * Used to decide whether to send confirm:false to the backend.
- */
 function isCreateIntent(msg: string): boolean {
-  return /\b(add|create|make|new|schedule|remind)\b/i.test(msg)
+  return /\b(add|create|make|new|schedule|remind|شامل|بنا|نیا)\b/i.test(msg)
 }
 
-/**
- * Strips intent keywords from the raw message to isolate the task subject.
- *   "add homework tomorrow" → "homework"
- */
 function extractTask(raw: string): string {
   return raw
     .replace(
@@ -81,7 +74,6 @@ function detectPriority(text: string): 'high' | 'medium' | 'normal' {
   return 'normal'
 }
 
-/** Format ISO date string for display: "2026-03-06T09:00:00" → "Fri, 6 Mar" */
 function formatDueDate(iso: string): string {
   try {
     return new Date(iso).toLocaleDateString('en-GB', {
@@ -117,11 +109,16 @@ function AiAvatar() {
 // ---------------------------------------------------------------------------
 
 export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount, onAITaskCreate }: ChatPanelProps) {
+  const { t, lang } = useLanguage()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [creatingId, setCreatingId] = useState<number | null>(null) // which msg has in-flight create
+  const [creatingId, setCreatingId] = useState<number | null>(null)
+  const [isListening, setIsListening] = useState(false)
+  const [ttsEnabled, setTtsEnabled] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recogRef = useRef<any>(null)
 
   // Smart greeting on mount
   useEffect(() => {
@@ -135,6 +132,59 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
+
+  // ── Text-to-Speech helper ────────────────────────────────────────────────
+  function speakText(text: string) {
+    if (!ttsEnabled || typeof window === 'undefined' || !window.speechSynthesis) return
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = lang === 'ur' ? 'ur-PK' : 'en-US'
+    utterance.rate = 0.9
+    window.speechSynthesis.speak(utterance)
+  }
+
+  // ── Voice Input ──────────────────────────────────────────────────────────
+  function handleVoiceInput() {
+    if (isListening) {
+      recogRef.current?.stop()
+      setIsListening(false)
+      return
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SR: any = typeof window !== 'undefined' &&
+      ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
+
+    if (!SR) {
+      setMessages(prev => [
+        ...prev,
+        { id: Date.now(), role: 'assistant', content: 'Voice input is not supported in this browser. Try Chrome.' },
+      ])
+      return
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const recognition: any = new SR()
+    recognition.lang = lang === 'ur' ? 'ur-PK' : 'en-US'
+    recognition.interimResults = false
+    recognition.maxAlternatives = 1
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (e: any) => {
+      const transcript = e.results[0][0].transcript.trim()
+      setIsListening(false)
+      if (transcript) {
+        sendMessage(transcript)
+      }
+    }
+
+    recognition.onend = () => setIsListening(false)
+    recognition.onerror = () => setIsListening(false)
+
+    recognition.start()
+    recogRef.current = recognition
+    setIsListening(true)
+  }
 
   // ── Create Task button handler ──────────────────────────────────────────
   async function handleCreateTask(msgId: number, task: PendingTask) {
@@ -156,24 +206,20 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
-      // Mark message as confirmed (hide the button, update reply text)
+      const confirmMsg = `"${task.title}" ${t('taskAdded')}`
       setMessages(prev =>
         prev.map(m =>
           m.id === msgId
-            ? {
-                ...m,
-                content: `Task "${task.title}" added to your list!`,
-                pendingTask: undefined,
-                taskCreated: true,
-              }
+            ? { ...m, content: confirmMsg, pendingTask: undefined, taskCreated: true }
             : m
         )
       )
+      speakText(confirmMsg)
       onMutation?.()
     } catch {
       setMessages(prev =>
         prev.map(m =>
-          m.id === msgId ? { ...m, content: `Failed to create task. Please try again.` } : m
+          m.id === msgId ? { ...m, content: t('failedToCreate') } : m
         )
       )
     } finally {
@@ -181,9 +227,8 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
     }
   }
 
-  // ── Send handler ────────────────────────────────────────────────────────
-  async function handleSend() {
-    const text = input.trim()
+  // ── Core send logic (shared by keyboard, button, voice) ─────────────────
+  async function sendMessage(text: string) {
     if (!text || loading) return
 
     setMessages(prev => [...prev, { id: Date.now(), role: 'user', content: text }])
@@ -203,7 +248,6 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
         body: JSON.stringify({
           message: text,
           today: new Date().toISOString().split('T')[0],
-          // Preview mode for create intents — backend extracts without persisting
           confirm: !createIntent,
         }),
       })
@@ -216,7 +260,6 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
         pending_task?: PendingTask
       }
 
-      // Non-create actions (list, delete, toggle) → refresh task list
       if (data.actions.some(a => MUTATION_TOOLS.has(a.tool))) {
         onMutation?.()
       }
@@ -230,29 +273,37 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
           pendingTask: data.pending_task ?? undefined,
         },
       ])
+      speakText(data.reply)
     } catch {
       // ── Fallback: local simulation ──────────────────────────────────────
       await new Promise(resolve => setTimeout(resolve, AI_THINKING_DELAY))
       const createIntent = isCreateIntent(text)
       const taskTitle = extractTask(text)
+      const reply = simulateAI(text)
 
       setMessages(prev => [
         ...prev,
         {
           id: Date.now(),
           role: 'assistant',
-          content: simulateAI(text),
-          // For create intents, show a pending task card even in fallback mode
+          content: reply,
           pendingTask: createIntent && taskTitle ? { title: taskTitle[0].toUpperCase() + taskTitle.slice(1) } : undefined,
-          // Legacy fallback for onAITaskCreate modal (kept for non-create intents)
           showAction: !createIntent && text.toLowerCase().includes('add'),
           taskTitle,
           priority: detectPriority(text),
         },
       ])
+      speakText(reply)
     } finally {
       setLoading(false)
     }
+  }
+
+  // ── Send handler (from button / Enter key) ───────────────────────────────
+  async function handleSend() {
+    const text = input.trim()
+    if (!text || loading) return
+    await sendMessage(text)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -274,22 +325,51 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
           </span>
           <div>
-            <p className="text-xs font-bold text-white leading-none">AI Assistant</p>
+            <p className="text-xs font-bold text-white leading-none">{t('aiAssistant')}</p>
             <p className="text-[10px] font-medium text-white/70 leading-none mt-0.5 uppercase tracking-widest">
               Phase III · Live
             </p>
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="relative p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/20 transition-colors"
-          aria-label="Close chat"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+
+        {/* TTS toggle */}
+        <div className="relative flex items-center gap-2">
+          <button
+            onClick={() => setTtsEnabled(prev => !prev)}
+            title={ttsEnabled ? t('voiceOn') : t('voiceOff')}
+            className={`p-1.5 rounded-lg transition-colors ${
+              ttsEnabled
+                ? 'text-white bg-white/25 hover:bg-white/35'
+                : 'text-white/50 hover:text-white hover:bg-white/20'
+            }`}
+            aria-label="Toggle text-to-speech"
+          >
+            {ttsEnabled ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <line x1="23" y1="9" x2="17" y2="15" />
+                <line x1="17" y1="9" x2="23" y2="15" />
+              </svg>
+            )}
+          </button>
+
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/20 transition-colors"
+            aria-label="Close chat"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -310,11 +390,10 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
               </div>
             </div>
 
-            {/* ── Pending task preview card ──────────────────────────────── */}
+            {/* Pending task preview card */}
             {msg.role === 'assistant' && msg.pendingTask && !msg.taskCreated && (
               <div className="msg-in flex justify-start pl-8">
                 <div className="rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-950/40 dark:border-violet-700/50 px-3 py-2.5 flex flex-col gap-2 w-48">
-                  {/* Task info */}
                   <div className="flex flex-col gap-0.5">
                     <p className="text-xs font-semibold text-slate-800 dark:text-zinc-100 leading-tight">
                       {msg.pendingTask.title}
@@ -331,11 +410,10 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
                       </p>
                     )}
                     <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wide">
-                      Pending
+                      {t('pending')}
                     </span>
                   </div>
 
-                  {/* Create Task button */}
                   <button
                     onClick={() => handleCreateTask(msg.id, msg.pendingTask!)}
                     disabled={creatingId === msg.id}
@@ -346,7 +424,7 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
                         <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                           <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round" />
                         </svg>
-                        Adding…
+                        {t('adding')}
                       </>
                     ) : (
                       <>
@@ -354,7 +432,7 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
                           <line x1="12" y1="5" x2="12" y2="19" />
                           <line x1="5" y1="12" x2="19" y2="12" />
                         </svg>
-                        Create Task
+                        {t('createTask')}
                       </>
                     )}
                   </button>
@@ -362,14 +440,14 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
               </div>
             )}
 
-            {/* Legacy showAction button (non-create fallback) */}
+            {/* Legacy showAction button */}
             {msg.role === 'assistant' && msg.showAction && !msg.pendingTask && (
               <div className="msg-in flex justify-start pl-8">
                 <button
                   onClick={() => onAITaskCreate(msg.taskTitle ?? '', msg.priority ?? 'normal')}
                   className="px-3 py-1.5 text-xs font-medium rounded-xl bg-slate-900 text-white hover:scale-105 active:scale-95 transition-all duration-200 dark:bg-white dark:text-slate-900"
                 >
-                  + Create Task
+                  + {t('createTask')}
                 </button>
               </div>
             )}
@@ -391,18 +469,39 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
       {/* Input */}
       <div className="px-4 py-3 border-t border-gray-100/80 dark:border-zinc-700/60 bg-white/60 dark:bg-zinc-800/60 backdrop-blur-sm">
         <div className="flex gap-2 items-center">
+          {/* Voice input button */}
+          <button
+            onClick={handleVoiceInput}
+            disabled={loading}
+            title={isListening ? t('listening') : (lang === 'ur' ? 'آواز سے بولیں' : 'Speak')}
+            className={`flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl transition-all duration-200 disabled:opacity-40 ${
+              isListening
+                ? 'bg-red-500 text-white animate-pulse shadow-[0_0_0_3px_rgba(239,68,68,0.3)]'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600'
+            }`}
+            aria-label={isListening ? 'Stop listening' : 'Start voice input'}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          </button>
+
           <input
             type="text"
-            value={input}
-            onChange={e => setInput(e.target.value)}
+            value={isListening ? t('listening') : input}
+            onChange={e => !isListening && setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={loading ? 'Waiting for reply…' : 'Ask anything…'}
-            disabled={loading}
+            placeholder={loading ? t('chatWaiting') : t('chatAsk')}
+            disabled={loading || isListening}
             className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all duration-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed dark:bg-zinc-700 dark:border-zinc-600 dark:text-white dark:placeholder:text-zinc-400 dark:focus:ring-violet-400"
           />
+
           <button
             onClick={handleSend}
-            disabled={!input.trim() || loading}
+            disabled={!input.trim() || loading || isListening}
             className="w-9 h-9 flex items-center justify-center rounded-xl bg-linear-to-br from-violet-600 to-purple-600 text-white hover:opacity-90 disabled:opacity-40 transition-all duration-200 hover:scale-105 shadow-sm"
             aria-label="Send message"
           >

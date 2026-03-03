@@ -42,11 +42,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow the Next.js frontend on port 3000 in development.
+# CORS — allow the Next.js frontend in development.
 # Set ALLOWED_ORIGINS in .env for production.
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
-_origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+_origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001").split(",")
 
 app.add_middleware(
     CORSMiddleware,
