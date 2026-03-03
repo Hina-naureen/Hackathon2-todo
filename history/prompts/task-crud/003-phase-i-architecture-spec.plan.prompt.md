@@ -65,6 +65,7 @@ Created `specs/architecture.md` with the following sections:
 
 Note: User prompt referenced `task_manager.py`; actual module is `task_service.py` — documented in spec with a callout note.
 
+
 ## Outcome
 
 - ✅ Impact: Complete architecture reference document grounded in actual source code; serves as authoritative blueprint for Phase I and migration guide for Phase II
