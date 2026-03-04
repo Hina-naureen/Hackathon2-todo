@@ -327,7 +327,7 @@ export default function ChatPanel({ token, onClose, onMutation, pendingTaskCount
           <div>
             <p className="text-xs font-bold text-white leading-none">{t('aiAssistant')}</p>
             <p className="text-[10px] font-medium text-white/70 leading-none mt-0.5 uppercase tracking-widest">
-              Phase III · Live
+              Live
             </p>
           </div>
         </div>

@@ -61,6 +61,16 @@ function TasksViewContent({ initialTasks, token, userEmail, userName }: Props) {
     })
   }, [])
 
+  const handleMutation = useCallback(async () => {
+    triggerHighlight()
+    try {
+      const fresh = await tasksApi.getTasks(token)
+      setTasks(fresh)
+    } catch {
+      // fail silently — UI already shows the optimistic state
+    }
+  }, [token, triggerHighlight])
+
   useEffect(() => {
     const open = (e: Event) => {
       const title = (e as CustomEvent<{ title?: string }>).detail?.title ?? ''
@@ -247,7 +257,7 @@ function TasksViewContent({ initialTasks, token, userEmail, userName }: Props) {
       {/* Phase III — AI chat widget */}
       <ChatWidget
         token={token}
-        onMutation={triggerHighlight}
+        onMutation={handleMutation}
         pendingTaskCount={tasks.filter(t => !t.completed).length}
         onAITaskCreate={handleAITaskCreate}
       />

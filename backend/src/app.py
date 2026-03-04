@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="Todo API — Phase II",
+    title="Todo API",
     version="2.0.0",
     description="Evolution of Todo — REST API backend (FastAPI + SQLModel + Neon DB)",
     lifespan=lifespan,
